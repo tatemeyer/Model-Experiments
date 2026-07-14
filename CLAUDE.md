@@ -45,6 +45,37 @@ https://danielmiessler.com/blog/intent-engineering).
 - `needs-intent` — the issue lacks a verifiable success criterion; ask
   clarifying questions instead of guessing at implementation.
 
+## Scaling principles
+
+This repo starts as one project and is expected to grow to many
+(`projects/<name>/`), and to tens of thousands of lines. Four principles
+govern how it scales:
+
+1. **Context is a forest, not a monolith.** Don't centralize
+   documentation in one giant doc. Each `projects/<name>/` (and any
+   `tools/<name>/`) gets its own scoped `CLAUDE.md` covering only that
+   subtree. This root `CLAUDE.md` stays a short router plus the
+   cross-cutting rules below — it should not grow project-specific
+   detail. Claude Code loads `CLAUDE.md` from the cwd up to the repo
+   root, so a session working inside a project only pulls in that
+   project's context plus this file, not every other project's.
+2. **Internal tooling over agent labor.** Repetitive work (fetching
+   data, scaffolding a new project, running sweeps) should become a
+   script/CLI under `tools/`, not something an agent re-derives freeform
+   each time it comes up. Check `tools/README.md` before writing a
+   one-off script — if a tool already does it, use it; if it's a
+   recurring need without one, build the tool, don't repeat the labor.
+3. **Conventions grow with SOTA, not habit.** `CONVENTIONS.md` is a
+   dated, living record of repo-wide technical decisions (package
+   manager, linter, ML framework default, etc.). Revisit and update it
+   as better practice emerges — don't let it fossilize into "how we've
+   always done it."
+4. **Docs are agent-first.** Don't write human-oriented comments,
+   docstrings, or doc trees for code a human doesn't plan to touch by
+   hand. Write only what a future agent needs to avoid re-deriving
+   context; skip prose that exists just to explain what the code already
+   makes obvious.
+
 ## Working rules for Claude Code sessions here
 
 - Read the linked Issue's "Success Criteria" section before writing any
@@ -54,3 +85,6 @@ https://danielmiessler.com/blog/intent-engineering).
 - Do not add scaffolding, abstractions, or process beyond what the
   current Issue's intent requires — this repo is deliberately minimal
   until real experiments give it code to run.
+- Check `tools/README.md` before scripting something ad hoc; check
+  `CONVENTIONS.md` before picking a library/tool/pattern a convention
+  already covers.

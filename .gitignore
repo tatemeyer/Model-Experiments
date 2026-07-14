@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Data cache managed by tools/datasets (see mx-data) — never commit fetched/generated data
+.data/

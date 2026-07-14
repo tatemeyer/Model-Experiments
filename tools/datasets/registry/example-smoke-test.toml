@@ -1,0 +1,8 @@
+name = "example-smoke-test"
+description = "Tiny generated dataset used to verify the mx-data pipeline end-to-end. Not real data."
+license = "N/A (internal smoke test)"
+destination = ".data/example-smoke-test"
+
+[source]
+kind = "generator"
+command = ["python3", "tools/datasets/registry/generators/example_smoke_test.py"]

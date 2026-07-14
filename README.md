@@ -6,7 +6,18 @@ experiment in **Bitter Lesson Engineering** / **Intent Engineering**:
 specify the outcome and how to verify it, let the AI decide how.
 
 See [`CLAUDE.md`](./CLAUDE.md) for the full loop and the rules Claude Code
-sessions follow in this repo.
+sessions follow in this repo, and [`CONVENTIONS.md`](./CONVENTIONS.md) for
+current technical decisions (package manager, linter, ML framework, etc).
+
+## Layout
+
+- `projects/<name>/` — one subtree per experiment, each with its own
+  scoped `CLAUDE.md`.
+- `tools/` — internal automation (e.g. `mx-data`, the dataset
+  registry/fetch CLI). See [`tools/README.md`](./tools/README.md).
+- Single `uv` workspace rooted at this `pyproject.toml` — `uv sync
+  --all-packages` installs everything, `uv run pytest` runs every
+  project's tests.
 
 ## Quick start
 

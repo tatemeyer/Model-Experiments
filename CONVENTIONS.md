@@ -1,0 +1,68 @@
+# Conventions
+
+A living record of repo-wide decisions. Entries are dated; when a
+convention changes, add a new entry rather than silently editing history
+— the point is to track *why* the current best practice was adopted, so
+it can be revisited when a better one emerges (see `CLAUDE.md` principle
+3: conventions should grow with SOTA, not calcify).
+
+## 2026-07-14 — Python dependency management: uv workspace
+
+The repo root `pyproject.toml` is a virtual `uv` workspace (no
+`[project]` table of its own). Every tool under `tools/` and every
+project under `projects/` is a workspace member with its own
+`pyproject.toml`, sharing one `uv.lock` at the root. Run `uv sync
+--all-packages` to install everything; `uv run <cmd>` to execute inside
+the workspace env.
+
+Why: `uv` is currently the fastest and most widely adopted Python
+dependency manager, and its workspace feature is built for exactly this
+shape — one repo, many independently-versioned Python packages.
+
+## 2026-07-14 — Linting: ruff
+
+`ruff check .` (config lives in the root `pyproject.toml`,
+`line-length = 100`). No separate formatter/linter stack — ruff covers
+both lint rules and (via `ruff format`, not yet wired into CI) formatting.
+
+## 2026-07-14 — Testing: pytest, colocated
+
+Tests live next to the code they test (`tools/<name>/tests/`,
+`projects/<name>/tests/`), not in a top-level `tests/` tree. `uv run
+pytest` from the repo root discovers all of them (see `testpaths` in the
+root `pyproject.toml`).
+
+## 2026-07-14 — Datasets: mx-data is the only sanctioned path
+
+Any dataset — downloaded or simulator-generated — must be registered as
+a `.toml` entry in `tools/datasets/registry/` and fetched via `mx-data
+fetch <name>`. Do not hand-roll a `curl`/`wget`/download script inside a
+project; add a registry entry instead. This keeps data fetching
+reusable across projects, checksummed, and out of git (see
+`tools/README.md`).
+
+## 2026-07-14 — Compute assumption: modest, mostly free
+
+Default assumption for anything trained/simulated in this repo: CPU
+primarily, with an optional single consumer GPU (currently a GTX 1660
+Ti — Turing architecture, CUDA-capable, no tensor cores) and free-tier
+cloud only (Colab/Kaggle-class, no paid rented compute). Don't default
+to multi-GPU, large-batch, or paid-cloud-only designs; note explicitly
+in a project's `CLAUDE.md` if it needs more than this.
+
+## 2026-07-14 — ML framework default: PyTorch
+
+Unless a project's issue says otherwise, default to PyTorch. Given the
+compute assumption above (CPU + a non-tensor-core consumer GPU + free
+notebook tiers), PyTorch's ecosystem maturity and lower-friction CUDA/CPU
+path outweigh JAX's functional-transform advantages for now. Revisit
+per-project if a project's research question specifically benefits from
+JAX (e.g. needing to differentiate through a JAX-backed simulator).
+
+## 2026-07-14 — Documentation is agent-first, not human-first
+
+Don't write doc-comments, docstrings, or comments explaining what code
+does in areas a human doesn't plan to read or edit by hand — write only
+what a future agent needs to avoid re-deriving context (non-obvious
+invariants, why a workaround exists), and no more. Verbose human-oriented
+prose belongs only in places a human actually maintains directly.
