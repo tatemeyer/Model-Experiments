@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Clarify intent first
+    url: https://danielmiessler.com/blog/intent-engineering
+    about: If you can't yet state a verifiable success criterion, that's a sign the intent needs more thought before filing.

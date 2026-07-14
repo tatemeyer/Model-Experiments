@@ -1,0 +1,60 @@
+name: Intent
+description: >-
+  Specify a desired outcome for Claude Code to implement. State the WHAT
+  and the verification — never the HOW. Implementation steps belong to
+  the model, not the issue.
+title: "[Intent]: "
+labels:
+  - intent
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Per Bitter Lesson Engineering: describe the end state you want and
+        how anyone (human or CI) can verify it was reached. Do not
+        describe the steps to get there — that's what the implementer
+        (Claude Code) is for. If you find yourself writing steps, that's
+        a sign the intent isn't clear yet.
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: What should be true when this is done? Describe the end state, not the steps.
+      placeholder: "e.g. Running `X` produces `Y`; a new user can do `Z` without extra setup."
+    validations:
+      required: true
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: Success criteria / verification
+      description: >-
+        How will we know this was done correctly? Be as concrete and
+        machine-checkable as possible (a specific test, a specific
+        command and expected output, a specific observable behavior).
+      placeholder: "e.g. `pytest tests/test_x.py` passes; `curl ... ` returns 200 with body `{...}`."
+    validations:
+      required: true
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints (optional)
+      description: >-
+        Non-negotiables only — things that must NOT change, compatibility
+        requirements, security constraints. Not implementation guidance.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: autonomy
+    attributes:
+      label: Autonomy level
+      description: How much oversight does this need?
+      options:
+        - "autonomy:safe — implement, open PR, auto-merge on green CI"
+        - "autonomy:review — implement and open PR, human approves before merge"
+        - "autonomy:human — do not implement autonomously"
+    validations:
+      required: true
