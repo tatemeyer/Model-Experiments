@@ -98,3 +98,24 @@ the specific tradeoff (what, why trusted, what it costs) in the
 project's own `CLAUDE.md` each time — this convention doesn't pre-approve
 any specific package going forward, it just establishes the bar is
 "justified by literature + vetted for trust," not "never a new dep."
+
+## 2026-07-15 — Testing: fast by default, `slow` marker for model training
+
+Full `uv run pytest` runtime kept growing (~90s -> ~2:06 -> ~2:50 across
+PRs #5/#7/#9) as `projects/em-piml/tests/` accumulated tests that each
+actually train a PINN (35-100s+ apiece). Default `uv run pytest` (no
+args) must stay a fast, routine command for iterating on non-training
+code — it now excludes anything marked `slow` via `addopts = "-m 'not
+slow'"` in the root `pyproject.toml`, and completes in well under 30
+seconds.
+
+Mark a test `@pytest.mark.slow` (registered in `[tool.pytest.ini_options]
+markers`) if it actually trains/fits a model (as opposed to pure-Python
+logic, CLI plumbing, or fixture-based tests like
+`tools/datasets/tests/test_cli.py`, which stay fast and unmarked). Run
+the full suite, slow tests included, with `uv run pytest -m slow`
+(slow-only) or `uv run pytest -o addopts=""` (everything, overriding the
+default exclusion). CI (`.github/workflows/ci.yml`) runs both: a
+"Test (fast)" step (the default, unmarked command) and a "Test (slow)"
+step (`uv run pytest -m slow`) — so slow tests keep running in CI even
+though they're excluded from the local default.

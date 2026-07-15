@@ -10,3 +10,7 @@ select = ["E", "F", "I", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tools", "projects"]
+markers = [
+    "slow: marks tests that train a model and take a while (deselected by default; run explicitly with `uv run pytest -m slow` or `uv run pytest -o addopts=''` for the full suite)",
+]
+addopts = "-m 'not slow'"
