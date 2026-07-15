@@ -1,0 +1,19 @@
+[project]
+name = "em-piml"
+version = "0.1.0"
+description = "Physics-informed ML for electromagnetics — tokenization/embedding research testbed"
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.2",
+    "numpy>=1.26",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/em_piml"]
+
+[dependency-groups]
+dev = ["pytest>=8"]

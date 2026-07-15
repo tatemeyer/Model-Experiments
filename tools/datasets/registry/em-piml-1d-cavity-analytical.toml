@@ -1,0 +1,8 @@
+name = "em-piml-1d-cavity-analytical"
+description = "Analytical E(x,t) for the fundamental mode of a 1D PEC cavity — ground truth for projects/em-piml's baseline PINN."
+license = "N/A (synthetically generated, closed-form)"
+destination = ".data/em-piml-1d-cavity-analytical"
+
+[source]
+kind = "generator"
+command = ["python3", "tools/datasets/registry/generators/em_piml_1d_cavity_analytical.py"]
