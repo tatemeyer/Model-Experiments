@@ -59,6 +59,23 @@ path outweigh JAX's functional-transform advantages for now. Revisit
 per-project if a project's research question specifically benefits from
 JAX (e.g. needing to differentiate through a JAX-backed simulator).
 
+## 2026-07-14 — Branch naming: prefix by kind
+
+`main` is trunk. Everything else is prefixed by kind:
+`feat/<slug>`, `fix/<slug>`, `docs/<slug>`, `chore/<slug>`,
+`experiment/<slug>` (research spikes that may never merge). The GitHub
+rulesets in `.github/SETUP.md` target these patterns directly.
+
+## 2026-07-14 — Third-party GitHub Actions are pinned by commit SHA
+
+Not a moving version tag (`@v4`) — a pinned commit with a version
+comment (`@<sha> # v7.0.0`), kept current via `.github/dependabot.yml`'s
+`github-actions` ecosystem. GitHub-authored actions (`actions/*`) get
+the same treatment for consistency. Prompted by the March 2026
+`trivy-action` incident, where a compromised maintainer force-pushed
+version tags to redirect them at malicious commits — a SHA pin can't be
+silently repointed that way.
+
 ## 2026-07-14 — Documentation is agent-first, not human-first
 
 Don't write doc-comments, docstrings, or comments explaining what code

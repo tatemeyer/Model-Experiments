@@ -8,3 +8,9 @@ __pycache__/
 
 # Data cache managed by tools/datasets (see mx-data) — never commit fetched/generated data
 .data/
+
+# Secrets — never commit these; see .github/SETUP.md's Secrets and variables section
+.env
+.env.*
+*.pem
+*.key
