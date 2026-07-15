@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "torch>=2.2",
     "numpy>=1.26",
+    "pytorch-optimizer>=3.10",
 ]
 
 [build-system]
