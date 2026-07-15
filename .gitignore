@@ -6,6 +6,9 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 
+# Claude Code local state (e.g. isolated agent worktrees) — never repo content
+.claude/
+
 # Data cache managed by tools/datasets (see mx-data) — never commit fetched/generated data
 .data/
 
