@@ -122,9 +122,9 @@ def train_fourier_cavity_lbfgs(
     num_bands: int = 4,
     outer_steps: int = 50,
     max_iter: int = 50,
-    n_collocation: int = 200,
-    n_boundary: int = 64,
-    n_initial: int = 64,
+    n_collocation: int = 2000,
+    n_boundary: int = 400,
+    n_initial: int = 400,
 ) -> FourierCavityPINN:
     torch.manual_seed(seed)
     model = FourierCavityPINN(hidden=32, num_layers=3, num_bands=num_bands)
