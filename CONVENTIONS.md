@@ -83,3 +83,18 @@ does in areas a human doesn't plan to read or edit by hand — write only
 what a future agent needs to avoid re-deriving context (non-obvious
 invariants, why a workaround exists), and no more. Verbose human-oriented
 prose belongs only in places a human actually maintains directly.
+
+## 2026-07-15 — Small, well-vetted optimizer packages beyond `torch.optim` are acceptable when literature-justified
+
+Default is still `torch.optim` only — don't add an optimizer dependency
+on a whim. But when a specific research result names an optimizer not in
+`torch.optim` (e.g. Khodakarami et al. on SOAP/SS-Broyden resolving PINN
+spectral-bias instability, `projects/em-piml/CLAUDE.md` issue #11) and a
+small, actively-maintained, narrowly-scoped PyPI package implements it
+faithfully (checked: recent releases, real usage/stars, CI, doesn't drag
+in unrelated heavy deps), adopting it is preferable to hand-rolling the
+algorithm or vendoring an un-packaged reference implementation. Document
+the specific tradeoff (what, why trusted, what it costs) in the
+project's own `CLAUDE.md` each time — this convention doesn't pre-approve
+any specific package going forward, it just establishes the bar is
+"justified by literature + vetted for trust," not "never a new dep."

@@ -105,6 +105,7 @@ source = { editable = "projects/em-piml" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pytorch-optimizer" },
     { name = "torch" },
 ]
 
@@ -116,6 +117,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
+    { name = "pytorch-optimizer", specifier = ">=3.10" },
     { name = "torch", specifier = ">=2.2" },
 ]
 
@@ -597,6 +599,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e4/47/b9efed96c114afcfa3c9d3fe98a76a1d14c74a9e266d397cf6eb64be5e01/pytest-9.1.1.tar.gz", hash = "sha256:1088fbde8f2b49d95a549a195707afa7a76a3ce9bcadc26b6d71f0ffda5fe313", size = 1636369, upload-time = "2026-06-19T10:58:32.857Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl", hash = "sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c", size = 386536, upload-time = "2026-06-19T10:58:31.347Z" },
+]
+
+[[package]]
+name = "pytorch-optimizer"
+version = "3.10.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/15/4e/e12eb9026eb94be8d8c763b4243845e19080c23b150441b20c00d2e45013/pytorch_optimizer-3.10.1.tar.gz", hash = "sha256:c262319cc3ae7be9f591e8728f1883d3096b9d7e15bea358b4ca20dd848c6d2a", size = 21328294, upload-time = "2026-05-23T13:57:07.094Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ee/82/7c715ba010ab8256215a0510494b4a0eedeea24860f652b89345cac594c1/pytorch_optimizer-3.10.1-py3-none-any.whl", hash = "sha256:3719842dee778de50943a6865961f5d3bd6812d28f091822d3a68385dc7481b6", size = 300837, upload-time = "2026-05-23T13:57:09.688Z" },
 ]
 
 [[package]]

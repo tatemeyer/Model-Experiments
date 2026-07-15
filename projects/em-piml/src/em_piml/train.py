@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import torch
+from pytorch_optimizer import SOAP
 
 from em_piml.model import CavityPINN, FourierCavityPINN
 from em_piml.physics import PERIOD, L, analytical_field, pde_residual
@@ -90,6 +91,40 @@ def _train_pinn_lbfgs(
     return model
 
 
+def _train_pinn_soap(
+    model: torch.nn.Module,
+    steps: int,
+    n_collocation: int,
+    n_boundary: int,
+    n_initial: int,
+    lr: float,
+) -> torch.nn.Module:
+    # Same fixed (not resampled) point set as _train_pinn_lbfgs, so swapping the optimizer is
+    # the only variable in the L-BFGS vs. SOAP comparison. SOAP doesn't need this determinism
+    # (no line search), but keeping it matches the controlled-comparison premise.
+    #
+    # SOAP recomputes a Shampoo-style eigenbasis preconditioner every precondition_frequency
+    # steps via extra linear algebra (eigh) on top of the Adam-like update — on this sandbox,
+    # that made it ~200x more sensitive to CPU oversubscription (OpenMP thread contention with
+    # unrelated concurrent processes) than Adam/L-BFGS at the same matrix sizes. Pinning to a
+    # single thread avoids that thread-scheduling overhead; restored afterward so it doesn't
+    # leak into other tests/training runs sharing this process.
+    prior_threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        points = _sample_points(n_collocation, n_boundary, n_initial)
+        optimizer = SOAP(model.parameters(), lr=lr)
+        for _ in range(steps):
+            optimizer.zero_grad()
+            loss = _pinn_loss(model, *points)
+            loss.backward()
+            optimizer.step()
+    finally:
+        torch.set_num_threads(prior_threads)
+
+    return model
+
+
 def train_cavity_baseline(
     steps: int = 4000,
     seed: int = 0,
@@ -131,6 +166,20 @@ def train_fourier_cavity_lbfgs(
     return _train_pinn_lbfgs(model, outer_steps, max_iter, n_collocation, n_boundary, n_initial)
 
 
+def train_fourier_cavity_soap(
+    seed: int = 0,
+    num_bands: int = 4,
+    steps: int = 2000,
+    n_collocation: int = 2000,
+    n_boundary: int = 400,
+    n_initial: int = 400,
+    lr: float = 3e-3,
+) -> FourierCavityPINN:
+    torch.manual_seed(seed)
+    model = FourierCavityPINN(hidden=32, num_layers=3, num_bands=num_bands)
+    return _train_pinn_soap(model, steps, n_collocation, n_boundary, n_initial, lr)
+
+
 def evaluate_relative_l2_error(model: torch.nn.Module, seed: int = 123) -> float:
     torch.manual_seed(seed)
     x = torch.rand(500, 1) * L
@@ -145,9 +194,11 @@ def main() -> None:
     baseline = train_cavity_baseline()
     fourier = train_fourier_cavity_baseline()
     fourier_lbfgs = train_fourier_cavity_lbfgs()
+    fourier_soap = train_fourier_cavity_soap()
     print(f"baseline           relative L2 error: {evaluate_relative_l2_error(baseline):.4f}")
     print(f"fourier (adam)     relative L2 error: {evaluate_relative_l2_error(fourier):.4f}")
     print(f"fourier (lbfgs)    relative L2 error: {evaluate_relative_l2_error(fourier_lbfgs):.4f}")
+    print(f"fourier (soap)     relative L2 error: {evaluate_relative_l2_error(fourier_soap):.4f}")
 
 
 if __name__ == "__main__":
