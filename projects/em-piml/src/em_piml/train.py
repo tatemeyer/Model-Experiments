@@ -2,20 +2,18 @@ from __future__ import annotations
 
 import torch
 
-from em_piml.model import CavityPINN
+from em_piml.model import CavityPINN, FourierCavityPINN
 from em_piml.physics import PERIOD, L, analytical_field, pde_residual
 
 
-def train_cavity_baseline(
-    steps: int = 4000,
-    seed: int = 0,
-    n_collocation: int = 200,
-    n_boundary: int = 64,
-    n_initial: int = 64,
-    lr: float = 3e-3,
-) -> CavityPINN:
-    torch.manual_seed(seed)
-    model = CavityPINN(hidden=32, num_layers=3)
+def _train_pinn(
+    model: torch.nn.Module,
+    steps: int,
+    n_collocation: int,
+    n_boundary: int,
+    n_initial: int,
+    lr: float,
+) -> torch.nn.Module:
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     for _ in range(steps):
@@ -48,16 +46,48 @@ def train_cavity_baseline(
     return model
 
 
-def main() -> None:
-    model = train_cavity_baseline()
-    torch.manual_seed(123)
+def train_cavity_baseline(
+    steps: int = 4000,
+    seed: int = 0,
+    n_collocation: int = 200,
+    n_boundary: int = 64,
+    n_initial: int = 64,
+    lr: float = 3e-3,
+) -> CavityPINN:
+    torch.manual_seed(seed)
+    model = CavityPINN(hidden=32, num_layers=3)
+    return _train_pinn(model, steps, n_collocation, n_boundary, n_initial, lr)
+
+
+def train_fourier_cavity_baseline(
+    steps: int = 4000,
+    seed: int = 0,
+    n_collocation: int = 200,
+    n_boundary: int = 64,
+    n_initial: int = 64,
+    lr: float = 3e-3,
+    num_bands: int = 2,
+) -> FourierCavityPINN:
+    torch.manual_seed(seed)
+    model = FourierCavityPINN(hidden=32, num_layers=3, num_bands=num_bands)
+    return _train_pinn(model, steps, n_collocation, n_boundary, n_initial, lr)
+
+
+def evaluate_relative_l2_error(model: torch.nn.Module, seed: int = 123) -> float:
+    torch.manual_seed(seed)
     x = torch.rand(500, 1) * L
     t = torch.rand(500, 1) * PERIOD
     with torch.no_grad():
         predicted = model(x, t)
         true = analytical_field(x, t)
-    relative_l2 = (torch.linalg.norm(predicted - true) / torch.linalg.norm(true)).item()
-    print(f"relative L2 error over {x.shape[0]} random (x, t) points: {relative_l2:.4f}")
+    return (torch.linalg.norm(predicted - true) / torch.linalg.norm(true)).item()
+
+
+def main() -> None:
+    baseline = train_cavity_baseline()
+    fourier = train_fourier_cavity_baseline()
+    print(f"baseline relative L2 error: {evaluate_relative_l2_error(baseline):.4f}")
+    print(f"fourier  relative L2 error: {evaluate_relative_l2_error(fourier):.4f}")
 
 
 if __name__ == "__main__":
