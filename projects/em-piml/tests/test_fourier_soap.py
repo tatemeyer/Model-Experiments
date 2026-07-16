@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from em_piml.train import evaluate_relative_l2_error, train_fourier_cavity_soap
 
 # Issue #11: does SOAP (Vyas et al., "Improving and Stabilizing Shampoo using Adam") close the
@@ -12,6 +13,7 @@ from em_piml.train import evaluate_relative_l2_error, train_fourier_cavity_soap
 SOAP_BOUND = 0.08
 
 
+@pytest.mark.slow
 def test_soap_closes_num_bands_4_gap():
     """L-BFGS plateaus at 0.065-0.104 at num_bands=4. SOAP reaches 0.0232-0.0357."""
     model = train_fourier_cavity_soap(seed=0, num_bands=4)

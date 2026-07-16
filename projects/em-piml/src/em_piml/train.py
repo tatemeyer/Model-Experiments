@@ -32,14 +32,21 @@ def _pinn_loss(
 
 
 def _sample_points(
-    n_collocation: int, n_boundary: int, n_initial: int
+    n_collocation: int,
+    n_boundary: int,
+    n_initial: int,
+    generator: torch.Generator | None = None,
 ) -> tuple[torch.Tensor, ...]:
-    x_c = torch.rand(n_collocation, 1) * L
-    t_c = torch.rand(n_collocation, 1) * PERIOD
-    t_b = torch.rand(n_boundary, 1) * PERIOD
+    # generator=None draws from the global RNG (whatever torch.manual_seed set up before this
+    # call) - the original behavior, kept as the default so existing callers/tests are
+    # bit-for-bit unaffected. Passing an explicit generator (see train_fourier_cavity_lbfgs's
+    # points_seed) decouples "which points get drawn" from the model-init seed.
+    x_c = torch.rand(n_collocation, 1, generator=generator) * L
+    t_c = torch.rand(n_collocation, 1, generator=generator) * PERIOD
+    t_b = torch.rand(n_boundary, 1, generator=generator) * PERIOD
     x_b0 = torch.zeros(n_boundary, 1)
     x_bl = torch.full((n_boundary, 1), L)
-    x_i = torch.rand(n_initial, 1) * L
+    x_i = torch.rand(n_initial, 1, generator=generator) * L
     t_i = torch.zeros(n_initial, 1)
     return x_c, t_c, x_b0, x_bl, t_b, x_i, t_i
 
@@ -71,10 +78,11 @@ def _train_pinn_lbfgs(
     n_collocation: int,
     n_boundary: int,
     n_initial: int,
+    points_generator: torch.Generator | None = None,
 ) -> torch.nn.Module:
     # L-BFGS assumes a fixed (deterministic) objective across its internal line-search
     # evaluations, so — unlike Adam — collocation points are sampled once, not per step.
-    points = _sample_points(n_collocation, n_boundary, n_initial)
+    points = _sample_points(n_collocation, n_boundary, n_initial, generator=points_generator)
     optimizer = torch.optim.LBFGS(
         model.parameters(), max_iter=max_iter, history_size=50, line_search_fn="strong_wolfe"
     )
@@ -160,13 +168,30 @@ def train_fourier_cavity_lbfgs(
     n_collocation: int = 2000,
     n_boundary: int = 400,
     n_initial: int = 400,
+    points_seed: int | None = None,
 ) -> FourierCavityPINN:
+    # points_seed=None (default): points are drawn from the same global RNG stream as model
+    # init, exactly as before (issue #8's behavior, unaffected). Passing an explicit
+    # points_seed draws the collocation/boundary/initial set from an independent generator, so
+    # `seed` (model init) and `points_seed` (which points get drawn) can be varied separately -
+    # see issue #12, which needed this to tell "point count" and "which points" apart.
     torch.manual_seed(seed)
     # hidden=64 (up from 32, used everywhere else including num_bands=2) -- issue #10 found the
     # higher-dimensional Fourier-embedded input at num_bands=4 was capacity-bottlenecked at 32-wide;
     # see project CLAUDE.md. num_bands=2 is untouched (train_fourier_cavity_baseline still uses 32).
     model = FourierCavityPINN(hidden=64, num_layers=3, num_bands=num_bands)
-    return _train_pinn_lbfgs(model, outer_steps, max_iter, n_collocation, n_boundary, n_initial)
+    points_generator = None
+    if points_seed is not None:
+        points_generator = torch.Generator().manual_seed(points_seed)
+    return _train_pinn_lbfgs(
+        model,
+        outer_steps,
+        max_iter,
+        n_collocation,
+        n_boundary,
+        n_initial,
+        points_generator=points_generator,
+    )
 
 
 def train_fourier_cavity_soap(
