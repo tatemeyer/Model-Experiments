@@ -162,7 +162,10 @@ def train_fourier_cavity_lbfgs(
     n_initial: int = 400,
 ) -> FourierCavityPINN:
     torch.manual_seed(seed)
-    model = FourierCavityPINN(hidden=32, num_layers=3, num_bands=num_bands)
+    # hidden=64 (up from 32, used everywhere else including num_bands=2) -- issue #10 found the
+    # higher-dimensional Fourier-embedded input at num_bands=4 was capacity-bottlenecked at 32-wide;
+    # see project CLAUDE.md. num_bands=2 is untouched (train_fourier_cavity_baseline still uses 32).
+    model = FourierCavityPINN(hidden=64, num_layers=3, num_bands=num_bands)
     return _train_pinn_lbfgs(model, outer_steps, max_iter, n_collocation, n_boundary, n_initial)
 
 
