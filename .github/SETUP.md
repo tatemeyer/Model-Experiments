@@ -118,6 +118,30 @@ Both third-party actions we use are now pinned by commit SHA (not a
 moving version tag) in `ci.yml`, with `dependabot.yml` set up to keep
 those pins current via PRs — see Advanced Security below.
 
+### Troubleshooting: CI shows `startup_failure` with zero jobs created
+
+Already happened once — cost several hours and let a handful of PRs
+merge without their gating CI actually running. Signature: `CI`
+workflow runs show `status: completed, conclusion: startup_failure`,
+`total_jobs: 0` (no job ever started, not even a failed one), and the
+run **cannot be retried** via the API (`403`) — a policy-level block,
+not a transient blip. Other workflow types (CodeQL) keep working fine,
+which is what makes it easy to miss.
+
+Root cause that one time: the "Allow or block specified actions and
+reusable workflows" allow-list entry was `astral-sh/setup-uv` with no
+`@ref` suffix. `ci.yml` references the action pinned by full commit SHA
+(`astral-sh/setup-uv@<sha>`); GitHub's allow-list matcher needs the
+pattern to include a ref part (`astral-sh/setup-uv@*` to match any ref).
+Without it, the action doesn't match the allow-list, so GitHub refuses
+to start the workflow at all.
+
+If you see this again: Settings → Actions → General → the allow-list
+box → confirm every entry has an `@ref`/`@*` suffix matching how the
+action is actually referenced in the workflow files. After fixing it,
+the already-failed runs are dead ends — you need a fresh commit/push to
+get a new, retriable run.
+
 ## Web hooks
 
 Not applicable right now. Claude Code sessions subscribed to a PR

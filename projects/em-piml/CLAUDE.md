@@ -53,6 +53,17 @@ solution (e.g. `t = PERIOD/4`, where `cos(omega*t) = 0`), the near-zero
 denominator inflates the metric to nonsense. Always evaluate over many
 points spanning the domain.
 
+Second pitfall already hit once: **seed the RNG before constructing the
+model, not after.** A refactor while adding a second training variant
+moved `torch.manual_seed(seed)` to after `model = SomeModel(...)` — the
+model's weight initialization then drew from whatever the ambient RNG
+state happened to be, not the intended seed, silently breaking
+reproducibility (only training-time sampling stayed seeded). Caught by
+re-verifying that a fixed seed reproduces the exact same result before
+trusting a seed-to-seed comparison. If you add a new `train_*` function
+here, verify determinism (same seed in, bit-identical result out)
+before trusting any numbers from it.
+
 ## Data
 
 Ground-truth grid is registered via `mx-data`, not computed ad hoc:
