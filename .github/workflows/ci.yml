@@ -22,5 +22,8 @@ jobs:
       - name: Lint
         run: uvx ruff check .
 
-      - name: Test
+      - name: Test (fast)
         run: uv run pytest
+
+      - name: Test (slow)
+        run: uv run pytest -m slow
