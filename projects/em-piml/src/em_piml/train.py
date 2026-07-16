@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import torch
 from pytorch_optimizer import SOAP
 
 from em_piml.model import CavityPINN, FourierCavityPINN, PseudoSequenceCavityPINN, _pseudo_sequence
-from em_piml.physics import PERIOD, C, L, analytical_field, pde_residual
+from em_piml.physics import PERIOD, C, L, analytical_field, analytical_field_two_mode, pde_residual
 
 
 def _pinn_loss(
@@ -16,10 +18,15 @@ def _pinn_loss(
     t_b: torch.Tensor,
     x_i: torch.Tensor,
     t_i: torch.Tensor,
+    field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
 ) -> torch.Tensor:
+    # field_fn defaults to the single-mode analytical_field (existing behavior, unaffected);
+    # issue #22's two-mode training functions pass analytical_field_two_mode instead — dE/dt(x,0)
+    # = 0 still holds for that target too (each mode's cos(.) has zero time-derivative at t=0, so
+    # the sum's does too), so loss_ic_dot below needs no field_fn-specific change.
     loss_pde = (pde_residual(model, x_c, t_c) ** 2).mean()
     loss_bc = (model(x_b0, t_b) ** 2).mean() + (model(x_bl, t_b) ** 2).mean()
-    loss_ic = ((model(x_i, t_i) - analytical_field(x_i, t_i)) ** 2).mean()
+    loss_ic = ((model(x_i, t_i) - field_fn(x_i, t_i)) ** 2).mean()
 
     t_i_grad = t_i.clone().requires_grad_(True)
     e_i = model(x_i, t_i_grad)
@@ -58,13 +65,14 @@ def _train_pinn_adam(
     n_boundary: int,
     n_initial: int,
     lr: float,
+    field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
 ) -> torch.nn.Module:
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     for _ in range(steps):
         optimizer.zero_grad()
         points = _sample_points(n_collocation, n_boundary, n_initial)
-        loss = _pinn_loss(model, *points)
+        loss = _pinn_loss(model, *points, field_fn=field_fn)
         loss.backward()
         optimizer.step()
 
@@ -322,13 +330,53 @@ def train_pseudo_sequence_cavity(
     return _train_pseudo_sequence_pinn_adam(model, steps, n_collocation, n_boundary, n_initial, lr)
 
 
-def evaluate_relative_l2_error(model: torch.nn.Module, seed: int = 123) -> float:
+def train_cavity_two_mode(
+    steps: int = 4000,
+    seed: int = 0,
+    n_collocation: int = 200,
+    n_boundary: int = 64,
+    n_initial: int = 64,
+    lr: float = 3e-3,
+) -> CavityPINN:
+    # Same shipped defaults as train_cavity_baseline (issue #22's constraint: only the target
+    # field's mode content changes, everything else held fixed) -- only field_fn differs.
+    torch.manual_seed(seed)
+    model = CavityPINN(hidden=32, num_layers=3)
+    return _train_pinn_adam(
+        model, steps, n_collocation, n_boundary, n_initial, lr, field_fn=analytical_field_two_mode
+    )
+
+
+def train_fourier_cavity_two_mode(
+    steps: int = 4000,
+    seed: int = 0,
+    n_collocation: int = 200,
+    n_boundary: int = 64,
+    n_initial: int = 64,
+    lr: float = 3e-3,
+    num_bands: int = 2,
+) -> FourierCavityPINN:
+    # Same shipped defaults as train_fourier_cavity_baseline, including num_bands=2 -- see
+    # projects/em-piml/CLAUDE.md issue #22 for why that default's frequency coverage is itself
+    # part of what's being tested here, not something to silently retune.
+    torch.manual_seed(seed)
+    model = FourierCavityPINN(hidden=32, num_layers=3, num_bands=num_bands)
+    return _train_pinn_adam(
+        model, steps, n_collocation, n_boundary, n_initial, lr, field_fn=analytical_field_two_mode
+    )
+
+
+def evaluate_relative_l2_error(
+    model: torch.nn.Module,
+    seed: int = 123,
+    field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
+) -> float:
     torch.manual_seed(seed)
     x = torch.rand(500, 1) * L
     t = torch.rand(500, 1) * PERIOD
     with torch.no_grad():
         predicted = model(x, t)
-        true = analytical_field(x, t)
+        true = field_fn(x, t)
     return (torch.linalg.norm(predicted - true) / torch.linalg.norm(true)).item()
 
 
@@ -344,6 +392,15 @@ def main() -> None:
     print(f"fourier (soap)     relative L2 error: {evaluate_relative_l2_error(fourier_soap):.4f}")
     ps_err = evaluate_relative_l2_error(pseudo_sequence)
     print(f"pseudo-sequence    relative L2 error: {ps_err:.4f}")
+
+    two_mode = train_cavity_two_mode()
+    two_mode_fourier = train_fourier_cavity_two_mode()
+    two_mode_err = evaluate_relative_l2_error(two_mode, field_fn=analytical_field_two_mode)
+    two_mode_fourier_err = evaluate_relative_l2_error(
+        two_mode_fourier, field_fn=analytical_field_two_mode
+    )
+    print(f"two-mode (plain)   relative L2 error: {two_mode_err:.4f}")
+    print(f"two-mode (fourier) relative L2 error: {two_mode_fourier_err:.4f}")
 
 
 if __name__ == "__main__":
