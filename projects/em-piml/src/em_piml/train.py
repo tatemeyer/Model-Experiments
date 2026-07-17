@@ -87,6 +87,7 @@ def _train_pinn_lbfgs(
     n_boundary: int,
     n_initial: int,
     points_generator: torch.Generator | None = None,
+    field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
 ) -> torch.nn.Module:
     # L-BFGS assumes a fixed (deterministic) objective across its internal line-search
     # evaluations, so — unlike Adam — collocation points are sampled once, not per step.
@@ -97,7 +98,7 @@ def _train_pinn_lbfgs(
 
     def closure() -> torch.Tensor:
         optimizer.zero_grad()
-        loss = _pinn_loss(model, *points)
+        loss = _pinn_loss(model, *points, field_fn=field_fn)
         loss.backward()
         return loss
 
@@ -114,6 +115,7 @@ def _train_pinn_soap(
     n_boundary: int,
     n_initial: int,
     lr: float,
+    field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
 ) -> torch.nn.Module:
     # Same fixed (not resampled) point set as _train_pinn_lbfgs, so swapping the optimizer is
     # the only variable in the L-BFGS vs. SOAP comparison. SOAP doesn't need this determinism
@@ -132,7 +134,7 @@ def _train_pinn_soap(
         optimizer = SOAP(model.parameters(), lr=lr)
         for _ in range(steps):
             optimizer.zero_grad()
-            loss = _pinn_loss(model, *points)
+            loss = _pinn_loss(model, *points, field_fn=field_fn)
             loss.backward()
             optimizer.step()
     finally:
@@ -313,6 +315,54 @@ def train_fourier_cavity_soap(
     torch.manual_seed(seed)
     model = FourierCavityPINN(hidden=32, num_layers=3, num_bands=num_bands)
     return _train_pinn_soap(model, steps, n_collocation, n_boundary, n_initial, lr)
+
+
+def train_fourier_cavity_lbfgs_two_mode(
+    seed: int = 0,
+    num_bands: int = 4,
+    outer_steps: int = 50,
+    max_iter: int = 50,
+    n_collocation: int = 2000,
+    n_boundary: int = 400,
+    n_initial: int = 400,
+    points_seed: int | None = None,
+) -> FourierCavityPINN:
+    # issue #25: same shipped recipe as train_fourier_cavity_lbfgs (issue #10's capacity fix,
+    # issue #8's density fix) -- only field_fn differs, same pattern as train_*_two_mode above.
+    # Adam destabilizes at num_bands>=2 on this target the same way issue #4 found on the
+    # single-mode baseline (see CLAUDE.md), so this and the SOAP variant below are what let
+    # num_bands be tested at all past 2 without confounding "can't train" with "can't represent."
+    torch.manual_seed(seed)
+    model = FourierCavityPINN(hidden=64, num_layers=3, num_bands=num_bands)
+    points_generator = None
+    if points_seed is not None:
+        points_generator = torch.Generator().manual_seed(points_seed)
+    return _train_pinn_lbfgs(
+        model,
+        outer_steps,
+        max_iter,
+        n_collocation,
+        n_boundary,
+        n_initial,
+        points_generator=points_generator,
+        field_fn=analytical_field_two_mode,
+    )
+
+
+def train_fourier_cavity_soap_two_mode(
+    seed: int = 0,
+    num_bands: int = 4,
+    steps: int = 2000,
+    n_collocation: int = 2000,
+    n_boundary: int = 400,
+    n_initial: int = 400,
+    lr: float = 3e-3,
+) -> FourierCavityPINN:
+    torch.manual_seed(seed)
+    model = FourierCavityPINN(hidden=32, num_layers=3, num_bands=num_bands)
+    return _train_pinn_soap(
+        model, steps, n_collocation, n_boundary, n_initial, lr, field_fn=analytical_field_two_mode
+    )
 
 
 def train_pseudo_sequence_cavity(
