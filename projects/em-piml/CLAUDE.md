@@ -143,6 +143,7 @@ periods collapses to a degenerate near-constant output; what fixes it?
 | #34 | Does NTK-based adaptive loss reweighting fix it? | 🔻 actively worse than doing nothing | `experiments/long-horizon-collapse/034-ntk-reweighted-long-horizon.md` |
 | #35 | Does an explicit anti-trivial-solution regularizer fix it? | 🔻 mildly worse than doing nothing | `experiments/long-horizon-collapse/035-antitrivial-regularizer.md` |
 | #36 | Does a Neuro-Spectral Architecture (NeuSA) fix it? | ✅ essentially solves it | `experiments/long-horizon-collapse/036-neusa-long-horizon.md` |
+| #37 | Does R3 (Retain-Resample-Release) adaptive sampling fix it? | 🔻 mildly worse than doing nothing | `experiments/long-horizon-collapse/037-r3-long-horizon.md` |
 
 **Standalone**
 
@@ -211,8 +212,23 @@ stale.
   it (architectural BC/IC + a linear ODE in spectral-coefficient space
   with a small learned correction), the first fix in this thread to do
   more than partially help.
-- R3 (Retain-Resample-Release) adaptive sampling is still untried
-  against this collapse. Queued as **issue #37**.
+- ~~R3 (Retain-Resample-Release) adaptive sampling is still untried
+  against this collapse.~~ Tried in issue #37: mildly worse than doing
+  nothing (0.930-0.934 vs. uniform's 0.923-0.926), not a fix. Diagnosed
+  mechanistically: R3's retain criterion correctly finds the genuinely
+  highest-residual region (the first ~40% of the domain), but that isn't
+  where the collapse lives — the collapsed region has near-zero residual
+  by construction, so R3 never once retains a point from it across a
+  full training run, and concentrating budget on the already-best-fit
+  early region implicitly starves the collapsed region of the sampling
+  pressure uniform resampling gave it. Third residual-based adaptive
+  mechanism (after NTK reweighting #34 and the anti-trivial regularizer
+  #35) to fail for the same underlying reason: this project's collapse
+  presents as *low*-residual, not high-residual, to any residual-derived
+  signal. See `037-r3-long-horizon.md` for the full diagnosis and leads
+  (a directly output-smoothness-based signal, rather than a
+  residual-derived one, is the one class of fix in this thread not yet
+  tried).
 - Network capacity has never been varied across any of the five
   long-horizon experiments (#23/#25/#30/#32/#34) — still open. Now being
   tested via new problem variants that isolate capacity from the
