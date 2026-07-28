@@ -141,6 +141,7 @@ periods collapses to a degenerate near-constant output; what fixes it?
 | #32 | Does a short-to-long curriculum fix it? | ⚠️ real but modest improvement | `experiments/long-horizon-collapse/032-curriculum-long-horizon.md` |
 | #34 | Does NTK-based adaptive loss reweighting fix it? | 🔻 actively worse than doing nothing | `experiments/long-horizon-collapse/034-ntk-reweighted-long-horizon.md` |
 | #35 | Does an explicit anti-trivial-solution regularizer fix it? | 🔻 mildly worse than doing nothing | `experiments/long-horizon-collapse/035-antitrivial-regularizer.md` |
+| #36 | Does a Neuro-Spectral Architecture (NeuSA) fix it? | ✅ essentially solves it | `experiments/long-horizon-collapse/036-neusa-long-horizon.md` |
 
 **Standalone**
 
@@ -197,9 +198,13 @@ stale.
   penalty, not a place it flags. See `035-antitrivial-regularizer.md` for
   the full diagnosis and its own leads (a collocation-starved variant
   might transfer better; untried).
-- Neuro-Spectral Architecture (NeuSA) and R3 (Retain-Resample-Release)
-  adaptive sampling are both untried against this collapse. Queued as
-  **issue #36** and **issue #37** respectively.
+- ~~Neuro-Spectral Architecture (NeuSA) is untried against this
+  collapse.~~ Done, see `036-neusa-long-horizon.md` — essentially solves
+  it (architectural BC/IC + a linear ODE in spectral-coefficient space
+  with a small learned correction), the first fix in this thread to do
+  more than partially help.
+- R3 (Retain-Resample-Release) adaptive sampling is still untried
+  against this collapse. Queued as **issue #37**.
 - Network capacity has never been varied across any of the five
   long-horizon experiments (#23/#25/#30/#32/#34) — still open. Now being
   tested via new problem variants that isolate capacity from the

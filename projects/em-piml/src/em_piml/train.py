@@ -8,7 +8,14 @@ from pytorch_optimizer import SOAP
 
 from em_piml.dielectric import PERIOD as DIELECTRIC_PERIOD
 from em_piml.dielectric import analytical_field_dielectric, pde_residual_dielectric
-from em_piml.model import CavityPINN, FourierCavityPINN, PseudoSequenceCavityPINN, _pseudo_sequence
+from em_piml.model import (
+    CavityPINN,
+    FourierCavityPINN,
+    NeuSACavityPINN,
+    PseudoSequenceCavityPINN,
+    _pseudo_sequence,
+    _rk4_integrate,
+)
 from em_piml.physics import PERIOD, C, L, analytical_field, analytical_field_two_mode, pde_residual
 
 
@@ -875,6 +882,79 @@ def train_cavity_antitrivial_long_horizon(
     )
 
 
+def _train_pinn_neusa(
+    model: NeuSACavityPINN, steps: int, lr: float, t_max: float
+) -> NeuSACavityPINN:
+    # NeuSA's training loop looks nothing like _train_pinn_adam: no collocation-point sampling at
+    # all -- BC/IC/dE/dt(x,0)=0 are architecturally exact (see NeuSACavityPINN), and the PDE
+    # residual reduces, via the sine basis's orthogonality on [0,L] and the correction term being
+    # the only source of dynamics error, to the squared norm of the correction term along the
+    # trajectory -- see experiments/long-horizon-collapse/036-neusa-long-horizon.md for the
+    # derivation. Full-batch every step: the whole RK4 trajectory is already computed at every
+    # grid point, nothing to subsample.
+    #
+    # Single-threaded for the same reason as _train_pinn_soap/_train_pseudo_sequence_pinn_adam:
+    # this workload is dominated by many small sequential ops (the RK4 unroll calls the tiny
+    # correction MLP 4 times per sub-step, backprop walks the whole chain), so default intra-op
+    # threading overhead dominates and this measured highly sensitive to this sandbox's CPU
+    # oversubscription from concurrent agent sessions (see CLAUDE.md issue #10's note on the same
+    # phenomenon). Restored afterward so it doesn't leak into other training calls.
+    prior_threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        n_steps = model.n_steps_for(t_max)
+        for _ in range(steps):
+            optimizer.zero_grad()
+            _, states = _rk4_integrate(model, t_max, n_steps)
+            loss = (model.correction(states) ** 2).mean()
+            loss.backward()
+            optimizer.step()
+    finally:
+        torch.set_num_threads(prior_threads)
+    return model
+
+
+def train_cavity_neusa_long_horizon(
+    steps: int = 100,
+    seed: int = 0,
+    lr: float = 3e-3,
+    horizon_periods: float = 5.0,
+    train_horizon_periods: float = 1.0,
+    num_modes: int = 8,
+    hidden: int = 16,
+    eps: float = 0.1,
+    field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
+) -> NeuSACavityPINN:
+    # issue #36: NeuSA against the long-horizon collapse (issue #23) -- a genuinely different
+    # architecture, not another loss/schedule change layered on the plain coordinate MLP every
+    # fix in #23/#30/#32/#34 shared. No n_collocation/n_boundary/n_initial -- see
+    # _train_pinn_neusa for why.
+    #
+    # Deliberate deviation from a naive "train and eval at the same horizon" (every prior
+    # long-horizon function in this file's convention): train_horizon_periods (default 1.0, one
+    # period) is decoupled from horizon_periods (the eval-time horizon, default 5.0, unchanged).
+    # This is legitimate specifically for NeuSA and not for any plain-MLP variant in this thread:
+    # BC/IC are architecturally exact (not sampled), and the only thing training ever "sees" is
+    # the (a, w) phase-space trajectory of the RK4 integration -- which is a periodic orbit for
+    # this LTI system, so training beyond ~1 period revisits the same manifold of states, not new
+    # information. Reducing train_horizon_periods this way is the dominant lever for fitting NeuSA
+    # into this project's CI budget: at the plan's literal defaults (num_modes=8,
+    # steps_per_unit_time=20, train==eval at 5 periods, steps=1000), a single training run measured
+    # ~5.3s per training step (~88 minutes total) -- backprop through the O(n_steps) sequential
+    # Python-level RK4 unroll dominates, and n_steps scales directly with the training horizon.
+    # Training on 1 period instead of 5 cuts n_steps (and thus cost) 5x; the empirical result below
+    # confirms this doesn't cost accuracy (see experiments/long-horizon-collapse/
+    # 036-neusa-long-horizon.md) -- it's exactly NeuSA's claimed architectural-extrapolation
+    # property (a learned vector field integrated fresh at eval time, independent of how long it
+    # was trained), unlike every plain-MLP fix in this thread, which needed points sampled across
+    # the *whole* eval domain to have any chance of fitting it.
+    torch.manual_seed(seed)
+    model = NeuSACavityPINN(num_modes=num_modes, hidden=hidden, eps=eps, field_fn=field_fn)
+    train_t_max = train_horizon_periods * PERIOD
+    return _train_pinn_neusa(model, steps, lr, train_t_max)
+
+
 def _dielectric_pinn_loss(
     model: torch.nn.Module,
     x_c: torch.Tensor,
@@ -1025,6 +1105,7 @@ def main() -> None:
     long_horizon_curriculum = train_cavity_curriculum_long_horizon()
     long_horizon_ntk = train_cavity_ntk_reweighted_long_horizon()
     long_horizon_antitrivial = train_cavity_antitrivial_long_horizon()
+    long_horizon_neusa = train_cavity_neusa_long_horizon()
     t_max = 5.0 * PERIOD
     long_horizon_err = evaluate_relative_l2_error(long_horizon, t_max=t_max)
     long_horizon_causal_err = evaluate_relative_l2_error(long_horizon_causal, t_max=t_max)
@@ -1034,6 +1115,7 @@ def main() -> None:
     long_horizon_curriculum_err = evaluate_relative_l2_error(long_horizon_curriculum, t_max=t_max)
     long_horizon_ntk_err = evaluate_relative_l2_error(long_horizon_ntk, t_max=t_max)
     long_horizon_antitrivial_err = evaluate_relative_l2_error(long_horizon_antitrivial, t_max=t_max)
+    long_horizon_neusa_err = evaluate_relative_l2_error(long_horizon_neusa, t_max=t_max)
     print(f"long-horizon (uniform)         relative L2 error: {long_horizon_err:.4f}")
     print(f"long-horizon (causal)          relative L2 error: {long_horizon_causal_err:.4f}")
     print(
@@ -1043,6 +1125,7 @@ def main() -> None:
     print(f"long-horizon (curriculum)      relative L2 error: {long_horizon_curriculum_err:.4f}")
     print(f"long-horizon (NTK-reweighted)  relative L2 error: {long_horizon_ntk_err:.4f}")
     print(f"long-horizon (anti-trivial)    relative L2 error: {long_horizon_antitrivial_err:.4f}")
+    print(f"long-horizon (NeuSA)           relative L2 error: {long_horizon_neusa_err:.4f}")
 
 
 if __name__ == "__main__":
