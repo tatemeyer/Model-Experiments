@@ -224,19 +224,23 @@ def _train_pseudo_sequence_pinn_adam(
     n_boundary: int,
     n_initial: int,
     lr: float,
+    t_max: float = PERIOD,
 ) -> PseudoSequenceCavityPINN:
     # Single-threaded for the same reason as _train_pinn_soap: this workload is dominated by many
     # small ops (_sequence_derivative does k backward passes per derivative, and the residual loss
     # needs 4 such calls for 2nd-order x/t derivatives), and default intra-op threading overhead
     # dominates at this scale — pinning to 1 thread measured ~3-4x faster in this project's
     # sandbox. Restored afterward so it doesn't leak into other training calls.
+    # t_max=PERIOD (default) preserves train_pseudo_sequence_cavity's original single-period
+    # domain; issue #30's long-horizon variant passes a multiple of PERIOD instead, matching
+    # issue #23's t_max plumbing through _sample_points/_train_pinn_adam.
     prior_threads = torch.get_num_threads()
     torch.set_num_threads(1)
     try:
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
         for _ in range(steps):
             optimizer.zero_grad()
-            points = _sample_points(n_collocation, n_boundary, n_initial)
+            points = _sample_points(n_collocation, n_boundary, n_initial, t_max=t_max)
             loss = _pseudo_sequence_pinn_loss(model, *points)
             loss.backward()
             optimizer.step()
@@ -382,6 +386,29 @@ def train_pseudo_sequence_cavity(
     torch.manual_seed(seed)
     model = PseudoSequenceCavityPINN(k=k, dt=dt)
     return _train_pseudo_sequence_pinn_adam(model, steps, n_collocation, n_boundary, n_initial, lr)
+
+
+def train_pseudo_sequence_cavity_long_horizon(
+    steps: int = 600,
+    seed: int = 0,
+    n_collocation: int = 30,
+    n_boundary: int = 16,
+    n_initial: int = 16,
+    lr: float = 3e-3,
+    k: int = 3,
+    dt: float = 1e-3,
+    horizon_periods: float = 5.0,
+) -> PseudoSequenceCavityPINN:
+    # issue #30: same shipped config as train_pseudo_sequence_cavity (issue #20) -- only the
+    # training/eval time domain changes (t_max = horizon_periods * PERIOD instead of one PERIOD),
+    # mirroring train_cavity_long_horizon's (issue #23) t_max-only variable, so this is a direct
+    # comparison against that issue's plain-baseline (~0.96) and causal-reweighted (~0.96) numbers
+    # on the exact same long-horizon target.
+    torch.manual_seed(seed)
+    model = PseudoSequenceCavityPINN(k=k, dt=dt)
+    return _train_pseudo_sequence_pinn_adam(
+        model, steps, n_collocation, n_boundary, n_initial, lr, t_max=horizon_periods * PERIOD
+    )
 
 
 def train_cavity_two_mode(
@@ -595,11 +622,19 @@ def main() -> None:
 
     long_horizon = train_cavity_long_horizon()
     long_horizon_causal = train_cavity_causal_long_horizon()
+    long_horizon_pseudo_sequence = train_pseudo_sequence_cavity_long_horizon()
     t_max = 5.0 * PERIOD
     long_horizon_err = evaluate_relative_l2_error(long_horizon, t_max=t_max)
     long_horizon_causal_err = evaluate_relative_l2_error(long_horizon_causal, t_max=t_max)
-    print(f"long-horizon (uniform) relative L2 error: {long_horizon_err:.4f}")
-    print(f"long-horizon (causal)  relative L2 error: {long_horizon_causal_err:.4f}")
+    long_horizon_pseudo_sequence_err = evaluate_relative_l2_error(
+        long_horizon_pseudo_sequence, t_max=t_max
+    )
+    print(f"long-horizon (uniform)         relative L2 error: {long_horizon_err:.4f}")
+    print(f"long-horizon (causal)          relative L2 error: {long_horizon_causal_err:.4f}")
+    print(
+        f"long-horizon (pseudo-sequence) relative L2 error: "
+        f"{long_horizon_pseudo_sequence_err:.4f}"
+    )
 
 
 if __name__ == "__main__":
