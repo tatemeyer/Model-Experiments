@@ -84,3 +84,9 @@ issue,experiment_slug,variant,seed,metric,value,params,date
 34,034-ntk-reweighted-long-horizon,ntk_reweighted_long_horizon,1,relative_l2,1.1336,"{""horizon_periods"":5,""update_every"":10,""alpha"":0.9}",2026-07-27
 34,034-ntk-reweighted-long-horizon,ntk_reweighted_long_horizon,2,relative_l2,0.9999,"{""horizon_periods"":5,""update_every"":10,""alpha"":0.9}",2026-07-27
 34,034-ntk-reweighted-long-horizon,ntk_reweighted_long_horizon,7,relative_l2,1.0275,"{""horizon_periods"":5,""update_every"":10,""alpha"":0.9}",2026-07-27
+46,046-dielectric-interface-capacity,hidden16,0,relative_l2,0.8338,"{""hidden"":16,""steps"":600,""x_int"":0.35,""eps_1"":1.0,""eps_2"":4.0}",2026-07-28
+46,046-dielectric-interface-capacity,hidden16,1,relative_l2,0.8497,"{""hidden"":16,""steps"":600,""x_int"":0.35,""eps_1"":1.0,""eps_2"":4.0}",2026-07-28
+46,046-dielectric-interface-capacity,hidden64,0,relative_l2,0.7075,"{""hidden"":64,""steps"":600,""x_int"":0.35,""eps_1"":1.0,""eps_2"":4.0}",2026-07-28
+46,046-dielectric-interface-capacity,hidden64,1,relative_l2,0.7415,"{""hidden"":64,""steps"":600,""x_int"":0.35,""eps_1"":1.0,""eps_2"":4.0}",2026-07-28
+46,046-dielectric-interface-capacity,hidden256,0,relative_l2,0.6729,"{""hidden"":256,""steps"":600,""x_int"":0.35,""eps_1"":1.0,""eps_2"":4.0}",2026-07-28
+46,046-dielectric-interface-capacity,hidden256,1,relative_l2,0.7383,"{""hidden"":256,""steps"":600,""x_int"":0.35,""eps_1"":1.0,""eps_2"":4.0}",2026-07-28
