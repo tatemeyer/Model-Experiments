@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import math
-
 import pytest
+from em_piml.physics import PERIOD
 from em_piml.train import (
     evaluate_relative_l2_error,
     train_cavity_causal_long_horizon,
@@ -13,11 +12,12 @@ from em_piml.train import (
 # baseline, and does causal loss-reweighting (Wang, Sankaran, Perdikaris, arXiv:2203.07404) fix
 # it? See CLAUDE.md for the full writeup, mechanism diagnosis, and multi-seed/multi-epsilon sweep.
 # Both bounds document a failure signature, not an accuracy target -- there's no bar to clear on
-# this target yet. Observed: uniform 0.9592-0.9633, causal (epsilon 0.1-500) 0.9571-0.9679 across
-# seeds 0/1/2/7 -- both far above this bound with wide margin, and statistically indistinguishable
-# from each other.
+# this target yet. Observed (corrected, see issue #32's erratum in CLAUDE.md -- this project's
+# PERIOD is 2, not 2*pi, so T_MAX below was previously computed over ~15.7 periods, not 5): uniform
+# 0.9225-0.9255, causal epsilon=1.0 0.9230-0.9251 across seeds 0/1/2/7 -- both far above this bound
+# with wide margin, and statistically indistinguishable from each other.
 FAILURE_LOWER_BOUND = 0.5
-T_MAX = 5.0 * (2 * math.pi)  # 5 periods of this project's fundamental mode (OMEGA = pi, C = L = 1)
+T_MAX = 5.0 * PERIOD  # 5 periods of this project's fundamental mode
 
 
 @pytest.mark.slow

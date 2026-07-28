@@ -583,6 +583,39 @@ def train_cavity_causal_long_horizon(
     )
 
 
+def train_cavity_curriculum_long_horizon(
+    steps: int = 4000,
+    seed: int = 0,
+    n_collocation: int = 200,
+    n_boundary: int = 64,
+    n_initial: int = 64,
+    lr: float = 3e-3,
+    horizon_periods: float = 5.0,
+    n_stages: int = 5,
+) -> CavityPINN:
+    # issue #32: same total step budget, point counts, lr, and architecture as
+    # train_cavity_long_horizon/train_cavity_causal_long_horizon (issue #23) -- the only variable
+    # is *when* the model sees which part of the time domain. Per Krishnapriyan et al.
+    # ("Characterizing possible failure modes in physics-informed neural networks," NeurIPS 2021,
+    # arXiv:2109.01050), training is split into n_stages stages of equal step count, each stage
+    # widening t_max by one more increment of PERIOD (stage k trains on t in [0, k/n_stages *
+    # horizon_periods * PERIOD]) -- the model must fit the shorter horizon before ever seeing the
+    # next chunk of the domain, rather than being exposed to the full 5-period domain from step 1.
+    # The same model/optimizer state carries across stages (a fresh _train_pinn_adam call per
+    # stage, continuing from the previous stage's weights) -- a fresh Adam optimizer each stage,
+    # not persisted across the t_max change, since Adam's per-parameter moment estimates were
+    # tuned against a different (narrower) point distribution in the prior stage.
+    torch.manual_seed(seed)
+    model = CavityPINN(hidden=32, num_layers=3)
+    steps_per_stage = steps // n_stages
+    for stage in range(1, n_stages + 1):
+        stage_t_max = (stage / n_stages) * horizon_periods * PERIOD
+        model = _train_pinn_adam(
+            model, steps_per_stage, n_collocation, n_boundary, n_initial, lr, t_max=stage_t_max
+        )
+    return model
+
+
 def evaluate_relative_l2_error(
     model: torch.nn.Module,
     seed: int = 123,
@@ -623,18 +656,21 @@ def main() -> None:
     long_horizon = train_cavity_long_horizon()
     long_horizon_causal = train_cavity_causal_long_horizon()
     long_horizon_pseudo_sequence = train_pseudo_sequence_cavity_long_horizon()
+    long_horizon_curriculum = train_cavity_curriculum_long_horizon()
     t_max = 5.0 * PERIOD
     long_horizon_err = evaluate_relative_l2_error(long_horizon, t_max=t_max)
     long_horizon_causal_err = evaluate_relative_l2_error(long_horizon_causal, t_max=t_max)
     long_horizon_pseudo_sequence_err = evaluate_relative_l2_error(
         long_horizon_pseudo_sequence, t_max=t_max
     )
+    long_horizon_curriculum_err = evaluate_relative_l2_error(long_horizon_curriculum, t_max=t_max)
     print(f"long-horizon (uniform)         relative L2 error: {long_horizon_err:.4f}")
     print(f"long-horizon (causal)          relative L2 error: {long_horizon_causal_err:.4f}")
     print(
         f"long-horizon (pseudo-sequence) relative L2 error: "
         f"{long_horizon_pseudo_sequence_err:.4f}"
     )
+    print(f"long-horizon (curriculum)      relative L2 error: {long_horizon_curriculum_err:.4f}")
 
 
 if __name__ == "__main__":
