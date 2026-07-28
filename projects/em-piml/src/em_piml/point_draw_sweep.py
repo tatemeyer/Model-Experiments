@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import statistics
+from pathlib import Path
 
 import torch
+from mx_viz.io import save_results
 
 from em_piml.train import evaluate_relative_l2_error, train_fourier_cavity_lbfgs
+
+# Repo-root-relative -- these scripts are documented to run via `uv run python -m
+# em_piml.point_draw_sweep` from the repo root, matching every other em_piml invocation example.
+OUTPUT_PATH = Path(".outputs/em-piml/point_draw_sweep.json")
 
 # Single-threaded: this sweep runs many sequential full training runs, and on a
 # multi-tenant/shared CPU box, torch's default intra-op multithreading (grabbing all cores per
@@ -56,6 +62,16 @@ def main() -> None:
             f"(mean={statistics.mean(errors):.4f}, stdev={statistics.pstdev(errors):.4f}, "
             f"spread={spread:.4f})"
         )
+
+    save_results(
+        OUTPUT_PATH,
+        {
+            str(n_collocation): dict(zip(map(str, POINT_DRAW_SEEDS), errors, strict=True))
+            for n_collocation, errors in results.items()
+        },
+        metadata={"title": "issue #12: point-draw variance (num_bands=4 L-BFGS)"},
+    )
+    print(f"Saved results to {OUTPUT_PATH}")
 
 
 if __name__ == "__main__":

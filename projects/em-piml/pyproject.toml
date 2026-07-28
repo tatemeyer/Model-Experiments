@@ -7,6 +7,7 @@ dependencies = [
     "torch>=2.2",
     "numpy>=1.26",
     "pytorch-optimizer>=3.10",
+    "mx-viz",
 ]
 
 [build-system]
@@ -15,6 +16,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/em_piml"]
+
+[tool.uv.sources]
+mx-viz = { workspace = true }
 
 [dependency-groups]
 dev = ["pytest>=8"]
