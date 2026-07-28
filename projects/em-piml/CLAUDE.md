@@ -140,6 +140,7 @@ periods collapses to a degenerate near-constant output; what fixes it?
 | #30 | Does pseudo-sequence tokenization fix it? | ❌ same collapse, no better | `experiments/long-horizon-collapse/030-pseudo-sequence-long-horizon.md` |
 | #32 | Does a short-to-long curriculum fix it? | ⚠️ real but modest improvement | `experiments/long-horizon-collapse/032-curriculum-long-horizon.md` |
 | #34 | Does NTK-based adaptive loss reweighting fix it? | 🔻 actively worse than doing nothing | `experiments/long-horizon-collapse/034-ntk-reweighted-long-horizon.md` |
+| #35 | Does an explicit anti-trivial-solution regularizer fix it? | 🔻 mildly worse than doing nothing | `experiments/long-horizon-collapse/035-antitrivial-regularizer.md` |
 | #36 | Does a Neuro-Spectral Architecture (NeuSA) fix it? | ✅ essentially solves it | `experiments/long-horizon-collapse/036-neusa-long-horizon.md` |
 
 **Standalone**
@@ -180,11 +181,23 @@ stale.
   L-BFGS at the same `num_bands` is unexplained.
 
 **long-horizon-collapse:**
-- The degenerate near-constant "escape hatch" itself (trivially
+- ~~The degenerate near-constant "escape hatch" itself (trivially
   satisfies the wave-equation residual) still isn't directly attacked by
   any fix tried so far — an explicit anti-trivial-solution penalty
   (variance/curvature floor) is the most literature-direct remaining
-  lead. Queued as **issue #35**.
+  lead.~~ Tried in issue #35 (Leiteritz & Pflueger's residual-gradient
+  penalty, arXiv:2112.05620): mildly worse than doing nothing
+  (0.968-0.972 vs. uniform's 0.923-0.926), not a fix. Diagnosed via
+  per-chunk instrumentation: the penalty's own value is *highest* where
+  the model still tracks real oscillation and decreases monotonically to
+  near-zero deep in the collapsed plateau — the paper's mechanism
+  assumes a trivial solution creates a localized residual-gradient spike
+  (from an abrupt truth-to-trivial switch in a collocation-starved
+  domain); this project's collapse is a smooth, domain-wide settling
+  where the trivial region is the *cheapest* place to satisfy the
+  penalty, not a place it flags. See `035-antitrivial-regularizer.md` for
+  the full diagnosis and its own leads (a collocation-starved variant
+  might transfer better; untried).
 - ~~Neuro-Spectral Architecture (NeuSA) is untried against this
   collapse.~~ Done, see `036-neusa-long-horizon.md` — essentially solves
   it (architectural BC/IC + a linear ODE in spectral-coefficient space
