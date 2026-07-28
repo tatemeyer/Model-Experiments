@@ -806,6 +806,133 @@ def train_cavity_ntk_reweighted_long_horizon(
     )
 
 
+def _pde_residual_and_input_grad_sq(
+    model: torch.nn.Module, x: torch.Tensor, t: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # Leiteritz & Pflueger, "How to Avoid Trivial Solutions in Physics-Informed Neural Networks,"
+    # arXiv:2112.05620, eq. 8/13: they observed the trivial (near-constant/zero) solution is
+    # reachable because the raw PDE residual can jump from "tracking the true solution" to
+    # "satisfied by the trivial solution" between two collocation points without penalty, and that
+    # jump shows up as a spike in the residual's own gradient. Their fix adds max_i (d(residual)/dt
+    # at collocation point i)^2 to the loss -- a smoothness/anti-spike penalty on the residual field
+    # itself, distinct from every fix already tried in this project's long-horizon thread (none of
+    # which touch the residual's own derivative). Their benchmark (1D harmonic oscillator) has one
+    # input dimension (t) so eq. 13's bracketed term is literally d(residual)/dt; this project's
+    # wave equation has two (x, t), so this generalizes it to the squared L2 norm of the residual's
+    # gradient over both inputs, ||(dr/dx, dr/dt)||^2 -- same "residual should not spike" intent,
+    # extended to a 2D domain rather than arbitrarily picking one axis.
+    #
+    # Duplicates pde_residual's derivative chain (rather than calling it directly) because the
+    # further autograd.grad call below needs a handle to the exact x/t leaf tensors the residual
+    # was computed from -- pde_residual clones its inputs internally and doesn't expose that clone,
+    # so reusing it here would silently differentiate w.r.t. a disconnected leaf instead of x, t.
+    x = x.clone().requires_grad_(True)
+    t = t.clone().requires_grad_(True)
+    e = model(x, t)
+
+    e_x = torch.autograd.grad(e, x, grad_outputs=torch.ones_like(e), create_graph=True)[0]
+    e_xx = torch.autograd.grad(e_x, x, grad_outputs=torch.ones_like(e_x), create_graph=True)[0]
+    e_t = torch.autograd.grad(e, t, grad_outputs=torch.ones_like(e), create_graph=True)[0]
+    e_tt = torch.autograd.grad(e_t, t, grad_outputs=torch.ones_like(e_t), create_graph=True)[0]
+    residual = e_tt - (C**2) * e_xx
+
+    r_x, r_t = torch.autograd.grad(
+        residual, [x, t], grad_outputs=torch.ones_like(residual), create_graph=True
+    )
+    grad_sq = r_x**2 + r_t**2
+    return residual, grad_sq
+
+
+def _antitrivial_pinn_loss(
+    model: torch.nn.Module,
+    x_c: torch.Tensor,
+    t_c: torch.Tensor,
+    x_b0: torch.Tensor,
+    x_bl: torch.Tensor,
+    t_b: torch.Tensor,
+    x_i: torch.Tensor,
+    t_i: torch.Tensor,
+    field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
+    lambda_grad: float = 1.0,
+) -> torch.Tensor:
+    # Same four terms as _pinn_loss (PDE residual, BC, IC, dE/dt(x,0)=0), plus one new term: the
+    # anti-trivial-solution penalty (see _pde_residual_and_input_grad_sq), weighted by lambda_grad
+    # (default 1.0, matching the paper's own eq. 13, which adds the term unscaled, no coefficient).
+    residual, grad_sq = _pde_residual_and_input_grad_sq(model, x_c, t_c)
+    loss_pde = (residual**2).mean()
+    loss_antitrivial = grad_sq.max()  # eq. 8's max_i, not mean -- penalizes the worst spike only
+
+    loss_bc = (model(x_b0, t_b) ** 2).mean() + (model(x_bl, t_b) ** 2).mean()
+    loss_ic = ((model(x_i, t_i) - field_fn(x_i, t_i)) ** 2).mean()
+
+    t_i_grad = t_i.clone().requires_grad_(True)
+    e_i = model(x_i, t_i_grad)
+    e_i_dot = torch.autograd.grad(
+        e_i, t_i_grad, grad_outputs=torch.ones_like(e_i), create_graph=True
+    )[0]
+    loss_ic_dot = (e_i_dot**2).mean()
+
+    return loss_pde + loss_bc + loss_ic + loss_ic_dot + lambda_grad * loss_antitrivial
+
+
+def _train_pinn_adam_antitrivial(
+    model: torch.nn.Module,
+    steps: int,
+    n_collocation: int,
+    n_boundary: int,
+    n_initial: int,
+    lr: float,
+    t_max: float,
+    lambda_grad: float = 1.0,
+    field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
+) -> torch.nn.Module:
+    # Single-threaded for the same reason as _train_pinn_soap/_train_pseudo_sequence_pinn_adam:
+    # the anti-trivial penalty needs a third-order derivative (one more autograd.grad call beyond
+    # pde_residual's own second-order one), and this project's sandbox has repeatedly shown that
+    # torch's default intra-op threading compounds badly under the concurrent-session CPU
+    # oversubscription documented in CLAUDE.md (issue #10) -- pinning to 1 thread avoided the
+    # thread-storm for SOAP/pseudo-sequence and is applied here pre-emptively for the same reason.
+    # Restored afterward so it doesn't leak into other training calls sharing this process.
+    prior_threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        for _ in range(steps):
+            optimizer.zero_grad()
+            points = _sample_points(n_collocation, n_boundary, n_initial, t_max=t_max)
+            loss = _antitrivial_pinn_loss(
+                model, *points, field_fn=field_fn, lambda_grad=lambda_grad
+            )
+            loss.backward()
+            optimizer.step()
+    finally:
+        torch.set_num_threads(prior_threads)
+
+    return model
+
+
+def train_cavity_antitrivial_long_horizon(
+    steps: int = 4000,
+    seed: int = 0,
+    n_collocation: int = 200,
+    n_boundary: int = 64,
+    n_initial: int = 64,
+    lr: float = 3e-3,
+    horizon_periods: float = 5.0,
+    lambda_grad: float = 1.0,
+) -> CavityPINN:
+    # issue #35: same shipped architecture/step budget/point counts/lr as
+    # train_cavity_long_horizon (issue #23) -- the only variable is the added anti-trivial-solution
+    # regularization term (_antitrivial_pinn_loss), per Leiteritz & Pflueger (arXiv:2112.05620),
+    # instead of uniform/causal/curriculum/NTK-reweighted loss handling.
+    torch.manual_seed(seed)
+    model = CavityPINN(hidden=32, num_layers=3)
+    t_max = horizon_periods * PERIOD
+    return _train_pinn_adam_antitrivial(
+        model, steps, n_collocation, n_boundary, n_initial, lr, t_max, lambda_grad
+    )
+
+
 def _train_pinn_neusa(
     model: NeuSACavityPINN, steps: int, lr: float, t_max: float
 ) -> NeuSACavityPINN:
@@ -1032,6 +1159,7 @@ def main() -> None:
     long_horizon_pseudo_sequence = train_pseudo_sequence_cavity_long_horizon()
     long_horizon_curriculum = train_cavity_curriculum_long_horizon()
     long_horizon_ntk = train_cavity_ntk_reweighted_long_horizon()
+    long_horizon_antitrivial = train_cavity_antitrivial_long_horizon()
     long_horizon_neusa = train_cavity_neusa_long_horizon()
     t_max = 5.0 * PERIOD
     long_horizon_err = evaluate_relative_l2_error(long_horizon, t_max=t_max)
@@ -1041,6 +1169,7 @@ def main() -> None:
     )
     long_horizon_curriculum_err = evaluate_relative_l2_error(long_horizon_curriculum, t_max=t_max)
     long_horizon_ntk_err = evaluate_relative_l2_error(long_horizon_ntk, t_max=t_max)
+    long_horizon_antitrivial_err = evaluate_relative_l2_error(long_horizon_antitrivial, t_max=t_max)
     long_horizon_neusa_err = evaluate_relative_l2_error(long_horizon_neusa, t_max=t_max)
     print(f"long-horizon (uniform)         relative L2 error: {long_horizon_err:.4f}")
     print(f"long-horizon (causal)          relative L2 error: {long_horizon_causal_err:.4f}")
@@ -1050,6 +1179,7 @@ def main() -> None:
     )
     print(f"long-horizon (curriculum)      relative L2 error: {long_horizon_curriculum_err:.4f}")
     print(f"long-horizon (NTK-reweighted)  relative L2 error: {long_horizon_ntk_err:.4f}")
+    print(f"long-horizon (anti-trivial)    relative L2 error: {long_horizon_antitrivial_err:.4f}")
     print(f"long-horizon (NeuSA)           relative L2 error: {long_horizon_neusa_err:.4f}")
 
 
