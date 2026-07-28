@@ -122,6 +122,7 @@ destabilize training, and how is it fixed?
 | #12 | Is the density non-monotonicity about count or which points? | — it's the points | `experiments/num-bands-gap/012-point-draw-variance.md` |
 | #10 | Does more network capacity close the residual gap? | ✅ | `experiments/num-bands-gap/010-network-capacity.md` |
 | #11 | Does SOAP close the rest of the gap? | ✅ (fully, independently of #10) | `experiments/num-bands-gap/011-soap-optimizer.md` |
+| #38 | Is the residual instability an FP32 precision artifact ("FP64 is All You Need")? | ❌ not a precision artifact | `experiments/num-bands-gap/038-fp64-precision.md` |
 
 **Thread: `two-mode-spectral-bias/`** — does a two-mode target reproduce
 spectral bias, and what fixes it?
@@ -161,9 +162,16 @@ stale.
   investigated (`012-point-draw-variance.md`: it's the point draw) but
   the fix — quasi-random/stratified sampling (Sobol, Latin hypercube) —
   is untried. Queued as **issue #40**.
-- Is the residual `num_bands=4` L-BFGS instability actually an FP32
-  precision artifact rather than an optimization one? Queued as
-  **issue #38**.
+- ~~Is the residual `num_bands=4` L-BFGS instability actually an FP32
+  precision artifact rather than an optimization one?~~ Tested in
+  **issue #38**: no — FP64 at a matched iteration budget leaves both the
+  original 32-hidden plateau (0.889-0.922, vs. FP32's 0.822-0.851) and the
+  shipped 64-hidden config (0.028-0.058, vs. FP32's 0.018-0.041)
+  essentially unchanged. It does, however, cost ~10-60x more wall time —
+  see `038-fp64-precision.md` for why (L-BFGS's convergence test stops
+  exiting early under FP64, confirmed via a reduced-budget ablation), and
+  for the still-open question of whether a much larger budget would
+  eventually help.
 
 **two-mode-spectral-bias:**
 - Network capacity was never widened specifically for this target the
@@ -220,6 +228,7 @@ stale.
   see `LITERATURE.md` and `experiments/020-pseudo-sequence-tokenization.md`
   for the reasoning.
 - The `num_bands=4/6` instability is now mostly explained and resolved
-  (see the `num-bands-gap` thread above) but two leads remain open there
-  (FP32 precision artifact, quasi-random sampling).
+  (see the `num-bands-gap` thread above); an FP32-precision-artifact
+  explanation was tested and ruled out (issue #38), one lead (quasi-random
+  sampling, issue #40) remains open there.
 
