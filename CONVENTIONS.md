@@ -89,15 +89,17 @@ prose belongs only in places a human actually maintains directly.
 Default is still `torch.optim` only — don't add an optimizer dependency
 on a whim. But when a specific research result names an optimizer not in
 `torch.optim` (e.g. Khodakarami et al. on SOAP/SS-Broyden resolving PINN
-spectral-bias instability, `projects/em-piml/CLAUDE.md` issue #11) and a
-small, actively-maintained, narrowly-scoped PyPI package implements it
-faithfully (checked: recent releases, real usage/stars, CI, doesn't drag
-in unrelated heavy deps), adopting it is preferable to hand-rolling the
-algorithm or vendoring an un-packaged reference implementation. Document
-the specific tradeoff (what, why trusted, what it costs) in the
-project's own `CLAUDE.md` each time — this convention doesn't pre-approve
-any specific package going forward, it just establishes the bar is
-"justified by literature + vetted for trust," not "never a new dep."
+spectral-bias instability, `projects/em-piml/experiments/num-bands-gap/
+011-soap-optimizer.md`) and a small, actively-maintained, narrowly-scoped
+PyPI package implements it faithfully (checked: recent releases, real
+usage/stars, CI, doesn't drag in unrelated heavy deps), adopting it is
+preferable to hand-rolling the algorithm or vendoring an un-packaged
+reference implementation. Document the specific tradeoff (what, why
+trusted, what it costs) in the project's own experiment write-up each
+time (see the "Project experiment logs" convention below for where that
+lives) — this convention doesn't pre-approve any specific package going
+forward, it just establishes the bar is "justified by literature +
+vetted for trust," not "never a new dep."
 
 ## 2026-07-15 — Testing: fast by default, `slow` marker for model training
 
@@ -119,3 +121,43 @@ default exclusion). CI (`.github/workflows/ci.yml`) runs both: a
 "Test (fast)" step (the default, unmarked command) and a "Test (slow)"
 step (`uv run pytest -m slow`) — so slow tests keep running in CI even
 though they're excluded from the local default.
+
+## 2026-07-27 — Project experiment logs: forest not monolith, plus structured data
+
+`projects/em-piml/CLAUDE.md` grew append-only from 74 to 1394 lines
+across 13 days as each new experiment appended a full write-up section
+and never removed one — every session working in that project loaded
+all of it regardless of relevance, and the growth was accelerating with
+no natural ceiling. Once a project accumulates more than a handful of
+experiments, apply the same "forest not monolith" principle (root
+`CLAUDE.md` principle 1) one level deeper, inside the project itself:
+
+- **`projects/<name>/experiments/`** — one Markdown file per experiment
+  (`NNN-slug.md`, issue number + short slug), containing that
+  experiment's full write-up (mechanism, results, diagnosis, leads).
+  Group experiments that target the same underlying question into a
+  subfolder (`experiments/<thread>/`) once a second one follows up on
+  the first; a standalone question stays a top-level file. See
+  `projects/em-piml/experiments/TEMPLATE.md` for the expected shape and
+  placement rule.
+- **`projects/<name>/results.csv`** — every experiment's numeric
+  results in tidy long format (one row per issue/variant/seed/metric
+  datapoint, a flexible JSON `params` column for whatever was swept).
+  Machine-readable by design — this is the data contract any
+  visualization/analysis tooling should read from, not a Markdown table
+  scraped out of prose.
+- **`projects/<name>/LITERATURE.md`** — a paper registry (one row per
+  paper cited or tested, with a verdict), so "have we already tried
+  this" is answerable by scanning a table instead of grepping every
+  experiment file.
+- The project's own `CLAUDE.md` shrinks to stable spec (the problem,
+  model, verification approach, data source — things every session
+  needs) plus an experiment index (one line per experiment, linking
+  out) and an actively-maintained "open leads" section — never a
+  per-experiment write-up appended in place.
+
+Why: the growth pattern is structural (an issue closes, its findings get
+recorded, the project accumulates them indefinitely) and will recur in
+every project that runs more than a few experiments, not just em-piml —
+adopt this layout from the start rather than waiting for the same
+1000+-line file to happen again.

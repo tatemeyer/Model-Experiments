@@ -58,7 +58,11 @@ govern how it scales:
    cross-cutting rules below — it should not grow project-specific
    detail. Claude Code loads `CLAUDE.md` from the cwd up to the repo
    root, so a session working inside a project only pulls in that
-   project's context plus this file, not every other project's.
+   project's context plus this file, not every other project's. The
+   same principle applies one level deeper once a project accumulates
+   more than a few experiments: individual write-ups belong in
+   `projects/<name>/experiments/`, not appended to that project's
+   `CLAUDE.md` — see `CONVENTIONS.md`'s "Project experiment logs" entry.
 2. **Internal tooling over agent labor.** Repetitive work (fetching
    data, scaffolding a new project, running sweeps) should become a
    script/CLI under `tools/`, not something an agent re-derives freeform
