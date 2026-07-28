@@ -161,3 +161,43 @@ recorded, the project accumulates them indefinitely) and will recur in
 every project that runs more than a few experiments, not just em-piml —
 adopt this layout from the start rather than waiting for the same
 1000+-line file to happen again.
+
+## 2026-07-27 — Test filenames are unique repo-wide, not just per-directory
+
+Test files across the whole workspace share one basename namespace: no
+`tests/` directory here has an `__init__.py`, so pytest's rootless
+import mode requires every test *filename* to be unique repo-wide, not
+just per-directory (`tools/viz/tests/test_cli.py` collided with
+`tools/datasets/tests/test_cli.py` and had to be renamed
+`test_sweep_cli.py`). Check `uv run pytest --collect-only -q` (or just
+grep existing `tests/` dirs) for a name collision before adding a new
+`test_<name>.py`, rather than adding `__init__.py` files repo-wide to
+work around it.
+
+## 2026-07-27 — Plotting: matplotlib (`tools/viz`, `mx-viz`)
+
+As research output grew past what fits in a `print()`-and-hand-transcribe
+loop (this project's many pointwise-check markdown tables, now living
+under `projects/em-piml/experiments/` per the entry above), a shared
+plotting toolkit (`tools/viz`) was added. matplotlib is the default
+plotting library for this repo — no plotting library existed before
+this entry, so this is a first adoption, not a switch.
+
+Why matplotlib over plotly/bokeh/altair: this repo reports findings as
+static content embedded in PR bodies and experiment-log markdown, not a
+hosted/interactive dashboard, so static PNG output is the better fit;
+it has a trivial headless-CI story (no browser/JS runtime — build
+`Figure`/`Axes` objects directly via the object-oriented API rather
+than importing `pyplot`, which avoids global backend state and works
+identically in an interactive session or CI test collection); and it
+carries no GPU/CUDA-adjacent dependency risk. `mx-viz`'s own plotting
+functions are framework-agnostic (numpy arrays / float sequences /
+dicts in, not model objects) so they aren't tied to PyTorch even though
+every current caller is.
+
+Note: `mx_viz.io`'s JSON schema (`{variant: {seed: value}}`) and the
+"Project experiment logs" entry above's `results.csv` (tidy long format,
+one row per issue/variant/seed/metric) are two independent data
+contracts that currently don't read from each other — a natural
+follow-up is teaching `mx-viz` to plot directly from `results.csv`
+rows instead of requiring its own JSON export per sweep.

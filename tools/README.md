@@ -25,3 +25,33 @@ does.
   `uv run mx-data fetch ...` so PATH resolves into `.venv`). A generator
   needing e.g. `numpy` should rely on some workspace member already
   depending on it rather than adding deps to `mx-datasets` itself.
+
+- **`viz/`** — `mx-viz`: a plotting library (matplotlib-backed, see
+  `CONVENTIONS.md`) for visualizing research experiments and results —
+  field comparisons, training loss curves, and multi-variant/multi-seed
+  sweep comparisons. Add it as a workspace dependency
+  (`[tool.uv.sources] mx-viz = { workspace = true }`, see
+  `projects/em-piml/pyproject.toml`) and import directly:
+  ```python
+  from mx_viz.fields import plot_field_heatmap, plot_field_slice
+  from mx_viz.training import plot_loss_curve
+  from mx_viz.sweeps import plot_sweep_comparison
+  from mx_viz.io import save_results, load_results
+  ```
+  `fields`/`training`/`sweeps` take plain numpy arrays / float sequences
+  / dicts, not model objects — framework-agnostic on purpose (works for
+  torch, JAX, or anything else; the caller does the "evaluate my model"
+  step, e.g. `em_piml.train.evaluate_field_grid`/`evaluate_field_slice`).
+  `save_results`/`load_results` persist a sweep's `{variant: {seed:
+  value}}` results as JSON (schema: `{"metadata": {...}, "results":
+  {...}}`) so they outlive the training process and can be re-plotted
+  later — write these to `.outputs/<project>/` at the repo root
+  (gitignored, mirrors `.data/`'s pattern, never commit generated
+  plots/results). One CLI verb exists for the one case with a natural
+  persisted artifact:
+  ```
+  uv run mx-viz sweep .outputs/em-piml/some_sweep.json --out sweep.png [--kind box|bar]
+  ```
+  Field/loss-curve plots stay library-only (no model checkpointing
+  exists in this repo to build a CLI verb around yet) — call them
+  directly from a training script or research session.

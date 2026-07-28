@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import statistics
+from pathlib import Path
 
 import torch
+from mx_viz.io import save_results
 
 from em_piml.physics import analytical_field_two_mode
 from em_piml.train import (
@@ -10,6 +12,8 @@ from em_piml.train import (
     train_fourier_cavity_lbfgs_two_mode,
     train_fourier_cavity_soap_two_mode,
 )
+
+OUTPUT_PATH = Path(".outputs/em-piml/num_bands_sweep.json")
 
 # Single-threaded for the same reason as point_draw_sweep.py: many sequential full training runs
 # on a shared/multi-tenant CPU box thrash badly under torch's default intra-op threading.
@@ -60,6 +64,16 @@ def main() -> None:
                 f"num_bands={num_bands}: {[round(e, 4) for e in errors]} "
                 f"(mean={statistics.mean(errors):.4f}, stdev={statistics.pstdev(errors):.4f})"
             )
+
+    flattened = {
+        f"{optimizer_name}_num_bands={num_bands}": dict(zip(map(str, SEEDS), errors, strict=True))
+        for optimizer_name, by_num_bands in results.items()
+        for num_bands, errors in by_num_bands.items()
+    }
+    save_results(
+        OUTPUT_PATH, flattened, metadata={"title": "issue #25: num_bands sweep (two-mode target)"}
+    )
+    print(f"Saved results to {OUTPUT_PATH}")
 
 
 if __name__ == "__main__":
