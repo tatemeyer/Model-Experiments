@@ -74,20 +74,25 @@ def _sample_points(
     n_initial: int,
     generator: torch.Generator | None = None,
     t_max: float = PERIOD,
+    dtype: torch.dtype = torch.float32,
 ) -> tuple[torch.Tensor, ...]:
     # generator=None draws from the global RNG (whatever torch.manual_seed set up before this
     # call) - the original behavior, kept as the default so existing callers/tests are
     # bit-for-bit unaffected. Passing an explicit generator (see train_fourier_cavity_lbfgs's
     # points_seed) decouples "which points get drawn" from the model-init seed. t_max=PERIOD
     # (default) preserves the original single-period domain; issue #23's long-horizon functions
-    # pass a multiple of PERIOD instead.
-    x_c = torch.rand(n_collocation, 1, generator=generator) * L
-    t_c = torch.rand(n_collocation, 1, generator=generator) * t_max
-    t_b = torch.rand(n_boundary, 1, generator=generator) * t_max
-    x_b0 = torch.zeros(n_boundary, 1)
-    x_bl = torch.full((n_boundary, 1), L)
-    x_i = torch.rand(n_initial, 1, generator=generator) * L
-    t_i = torch.zeros(n_initial, 1)
+    # pass a multiple of PERIOD instead. dtype=torch.float32 (default) preserves the original
+    # behavior bit-for-bit (torch.rand()'s implicit default dtype is float32 too); issue #38's
+    # FP64 variant passes torch.float64 so collocation/boundary/initial points match the model's
+    # own (also-cast-to-float64) parameter dtype -- mismatched dtypes between input and model
+    # weights would otherwise error inside the first Linear layer.
+    x_c = torch.rand(n_collocation, 1, generator=generator, dtype=dtype) * L
+    t_c = torch.rand(n_collocation, 1, generator=generator, dtype=dtype) * t_max
+    t_b = torch.rand(n_boundary, 1, generator=generator, dtype=dtype) * t_max
+    x_b0 = torch.zeros(n_boundary, 1, dtype=dtype)
+    x_bl = torch.full((n_boundary, 1), L, dtype=dtype)
+    x_i = torch.rand(n_initial, 1, generator=generator, dtype=dtype) * L
+    t_i = torch.zeros(n_initial, 1, dtype=dtype)
     return x_c, t_c, x_b0, x_bl, t_b, x_i, t_i
 
 
@@ -128,10 +133,13 @@ def _train_pinn_lbfgs(
     n_initial: int,
     points_generator: torch.Generator | None = None,
     field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
+    dtype: torch.dtype = torch.float32,
 ) -> torch.nn.Module:
     # L-BFGS assumes a fixed (deterministic) objective across its internal line-search
     # evaluations, so — unlike Adam — collocation points are sampled once, not per step.
-    points = _sample_points(n_collocation, n_boundary, n_initial, generator=points_generator)
+    points = _sample_points(
+        n_collocation, n_boundary, n_initial, generator=points_generator, dtype=dtype
+    )
     optimizer = torch.optim.LBFGS(
         model.parameters(), max_iter=max_iter, history_size=50, line_search_fn="strong_wolfe"
     )
@@ -322,17 +330,28 @@ def train_fourier_cavity_lbfgs(
     n_boundary: int = 400,
     n_initial: int = 400,
     points_seed: int | None = None,
+    hidden: int = 64,
+    dtype: torch.dtype = torch.float32,
 ) -> FourierCavityPINN:
     # points_seed=None (default): points are drawn from the same global RNG stream as model
     # init, exactly as before (issue #8's behavior, unaffected). Passing an explicit
     # points_seed draws the collocation/boundary/initial set from an independent generator, so
     # `seed` (model init) and `points_seed` (which points get drawn) can be varied separately -
     # see issue #12, which needed this to tell "point count" and "which points" apart.
-    torch.manual_seed(seed)
     # hidden=64 (up from 32, used everywhere else including num_bands=2) -- issue #10 found the
     # higher-dimensional Fourier-embedded input at num_bands=4 was capacity-bottlenecked at 32-wide;
     # see project CLAUDE.md. num_bands=2 is untouched (train_fourier_cavity_baseline still uses 32).
-    model = FourierCavityPINN(hidden=64, num_layers=3, num_bands=num_bands)
+    # hidden is now a parameter (default unchanged at 64) so issue #38 can rerun the *original*
+    # pre-issue-#10 32-hidden configuration too, under FP64, for a controlled comparison against
+    # both the 006/008 (32-hidden) and 010 (64-hidden) documented FP32 numbers.
+    # dtype=torch.float32 (default) preserves existing behavior bit-for-bit; issue #38 passes
+    # torch.float64 (see train_fourier_cavity_lbfgs_fp64 below) to test "FP64 is All You Need"
+    # (arXiv:2505.10949)'s claim that L-BFGS's convergence test firing early under FP32 explains
+    # PINN failure modes previously attributed to genuine local optima.
+    torch.manual_seed(seed)
+    model = FourierCavityPINN(hidden=hidden, num_layers=3, num_bands=num_bands)
+    if dtype != torch.float32:
+        model = model.to(dtype)
     points_generator = None
     if points_seed is not None:
         points_generator = torch.Generator().manual_seed(points_seed)
@@ -344,6 +363,38 @@ def train_fourier_cavity_lbfgs(
         n_boundary,
         n_initial,
         points_generator=points_generator,
+        dtype=dtype,
+    )
+
+
+def train_fourier_cavity_lbfgs_fp64(
+    seed: int = 0,
+    num_bands: int = 4,
+    outer_steps: int = 50,
+    max_iter: int = 50,
+    n_collocation: int = 2000,
+    n_boundary: int = 400,
+    n_initial: int = 400,
+    points_seed: int | None = None,
+    hidden: int = 64,
+) -> FourierCavityPINN:
+    """FP64 variant of train_fourier_cavity_lbfgs (issue #38) -- identical in every other respect
+    (same architecture/density/optimizer/step budget for a given `hidden`), only torch.float64
+    instead of the default torch.float32. Pass hidden=32 to reproduce issue #6/#8's original
+    pre-capacity-fix configuration under FP64; hidden=64 (default) is the currently-shipped
+    configuration from issue #10.
+    """
+    return train_fourier_cavity_lbfgs(
+        seed=seed,
+        num_bands=num_bands,
+        outer_steps=outer_steps,
+        max_iter=max_iter,
+        n_collocation=n_collocation,
+        n_boundary=n_boundary,
+        n_initial=n_initial,
+        points_seed=points_seed,
+        hidden=hidden,
+        dtype=torch.float64,
     )
 
 
@@ -1026,10 +1077,14 @@ def evaluate_relative_l2_error(
     seed: int = 123,
     field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
     t_max: float = PERIOD,
+    dtype: torch.dtype = torch.float32,
 ) -> float:
+    # dtype=torch.float32 (default) preserves existing behavior bit-for-bit. Must match the
+    # model's own parameter dtype (issue #38's FP64 models need dtype=torch.float64 here too) --
+    # a dtype mismatch between input and model weights errors inside the first Linear layer.
     torch.manual_seed(seed)
-    x = torch.rand(500, 1) * L
-    t = torch.rand(500, 1) * t_max
+    x = torch.rand(500, 1, dtype=dtype) * L
+    t = torch.rand(500, 1, dtype=dtype) * t_max
     with torch.no_grad():
         predicted = model(x, t)
         true = field_fn(x, t)

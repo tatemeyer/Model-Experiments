@@ -40,3 +40,14 @@ So at the time: optimizer choice mattered a lot (L-BFGS clearly did
 something Adam couldn't) but didn't fully explain the instability by
 itself at 200 points. See `008-denser-collocation.md` — lead #1 there
 turned out to be most of the answer.
+
+**Update (issue #38):** the "genuine local optimum" interpretation above
+was tested directly, not just assumed — "FP64 is All You Need" (Xu et al.,
+NeurIPS 2025, arXiv:2505.10949) argues failure modes like this one are
+often FP32 precision artifacts (L-BFGS's convergence test firing
+prematurely), not real local optima. Rerunning this exact 32-hidden/
+200-point configuration under `torch.float64` at the same iteration budget
+still plateaus at 0.889-0.922 relative L2 (seeds 0/1/2/7) — no better than
+the FP32 numbers above. Not a precision artifact; see
+`038-fp64-precision.md` for the full comparison and a mechanistic note on
+why FP64 costs ~10x more wall time here without changing the outcome.
