@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
+import numpy as np
 import torch
 from pytorch_optimizer import SOAP
 
+from em_piml.dielectric import PERIOD as DIELECTRIC_PERIOD
+from em_piml.dielectric import analytical_field_dielectric, pde_residual_dielectric
 from em_piml.model import (
     CavityPINN,
     FourierCavityPINN,
@@ -97,7 +100,11 @@ def _train_pinn_adam(
     lr: float,
     field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
     t_max: float = PERIOD,
+    history: list[float] | None = None,
 ) -> torch.nn.Module:
+    # history=None (default) preserves the original behavior exactly, zero-cost -- same opt-in
+    # idiom as _sample_points' generator=None. Pass a list to record loss.item() every step (e.g.
+    # for mx_viz.training.plot_loss_curve); every existing call site is bit-for-bit unaffected.
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     for _ in range(steps):
@@ -106,6 +113,8 @@ def _train_pinn_adam(
         loss = _pinn_loss(model, *points, field_fn=field_fn)
         loss.backward()
         optimizer.step()
+        if history is not None:
+            history.append(loss.item())
 
     return model
 
@@ -482,14 +491,23 @@ def train_cavity_long_horizon(
     n_initial: int = 64,
     lr: float = 3e-3,
     horizon_periods: float = 5.0,
+    history: list[float] | None = None,
 ) -> CavityPINN:
     # issue #23: same shipped defaults as train_cavity_baseline -- only the training/eval time
     # domain changes (t_max = horizon_periods * PERIOD instead of one PERIOD), uniform loss
     # weighting throughout (the causal variant below is the only variable-controlled comparison).
+    # history is optional loss-curve recording (see _train_pinn_adam), for mx_viz.
     torch.manual_seed(seed)
     model = CavityPINN(hidden=32, num_layers=3)
     return _train_pinn_adam(
-        model, steps, n_collocation, n_boundary, n_initial, lr, t_max=horizon_periods * PERIOD
+        model,
+        steps,
+        n_collocation,
+        n_boundary,
+        n_initial,
+        lr,
+        t_max=horizon_periods * PERIOD,
+        history=history,
     )
 
 
@@ -810,6 +828,72 @@ def train_cavity_neusa_long_horizon(
     return _train_pinn_neusa(model, steps, lr, train_t_max)
 
 
+def _dielectric_pinn_loss(
+    model: torch.nn.Module,
+    x_c: torch.Tensor,
+    t_c: torch.Tensor,
+    x_b0: torch.Tensor,
+    x_bl: torch.Tensor,
+    t_b: torch.Tensor,
+    x_i: torch.Tensor,
+    t_i: torch.Tensor,
+) -> torch.Tensor:
+    # issue #46: same four-term loss shape as _pinn_loss, but the PDE residual uses the
+    # piecewise-eps(x) wave equation (pde_residual_dielectric) and IC/IC-dot are supervised
+    # against the kinked reference solution (analytical_field_dielectric) instead of the
+    # homogeneous-cavity one -- everything else (BC terms, loss structure) is unchanged.
+    loss_pde = (pde_residual_dielectric(model, x_c, t_c) ** 2).mean()
+    loss_bc = (model(x_b0, t_b) ** 2).mean() + (model(x_bl, t_b) ** 2).mean()
+    loss_ic = ((model(x_i, t_i) - analytical_field_dielectric(x_i, t_i)) ** 2).mean()
+
+    t_i_grad = t_i.clone().requires_grad_(True)
+    e_i = model(x_i, t_i_grad)
+    e_i_dot = torch.autograd.grad(
+        e_i, t_i_grad, grad_outputs=torch.ones_like(e_i), create_graph=True
+    )[0]
+    loss_ic_dot = (e_i_dot**2).mean()  # dE/dt(x,0)=0 holds here too: cos(OMEGA*t) at t=0
+
+    return loss_pde + loss_bc + loss_ic + loss_ic_dot
+
+
+def _train_dielectric_pinn_adam(
+    model: torch.nn.Module,
+    steps: int,
+    n_collocation: int,
+    n_boundary: int,
+    n_initial: int,
+    lr: float,
+) -> torch.nn.Module:
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    for _ in range(steps):
+        optimizer.zero_grad()
+        points = _sample_points(n_collocation, n_boundary, n_initial, t_max=DIELECTRIC_PERIOD)
+        loss = _dielectric_pinn_loss(model, *points)
+        loss.backward()
+        optimizer.step()
+    return model
+
+
+def train_dielectric_cavity(
+    hidden: int = 64,
+    num_layers: int = 3,
+    steps: int = 4000,
+    seed: int = 0,
+    n_collocation: int = 200,
+    n_boundary: int = 64,
+    n_initial: int = 64,
+    lr: float = 3e-3,
+) -> CavityPINN:
+    # issue #46: same CavityPINN architecture family/training recipe as train_cavity_baseline
+    # (plain coordinate MLP, Adam, same step/point-count/lr defaults) -- hidden is the swept
+    # capacity variable (num_layers held fixed at 3, the baseline depth), everything else held at
+    # the project's standard single-mode recipe so this is a controlled comparison against #25's
+    # capacity finding, not a differently-tuned training setup entangled with the new physics.
+    torch.manual_seed(seed)
+    model = CavityPINN(hidden=hidden, num_layers=num_layers)
+    return _train_dielectric_pinn_adam(model, steps, n_collocation, n_boundary, n_initial, lr)
+
+
 def evaluate_relative_l2_error(
     model: torch.nn.Module,
     seed: int = 123,
@@ -823,6 +907,47 @@ def evaluate_relative_l2_error(
         predicted = model(x, t)
         true = field_fn(x, t)
     return (torch.linalg.norm(predicted - true) / torch.linalg.norm(true)).item()
+
+
+def evaluate_field_grid(
+    model: torch.nn.Module,
+    field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
+    t_max: float = PERIOD,
+    x_range: tuple[float, float] = (0.0, L),
+    n_x: int = 100,
+    n_t: int = 100,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    # Evaluates a trained model + its ground-truth field over a regular (x, t) grid and returns
+    # plain numpy arrays (x_grid, t_grid, predicted, true) -- mx_viz.fields.plot_field_heatmap
+    # takes numpy arrays rather than model objects to stay framework-agnostic (see tools/viz's
+    # CLAUDE.md-equivalent rationale); this is the torch-specific "evaluate over a grid" half that
+    # belongs here, not in the plotting library.
+    xs = torch.linspace(x_range[0], x_range[1], n_x)
+    ts = torch.linspace(0.0, t_max, n_t)
+    grid_x, grid_t = torch.meshgrid(xs, ts, indexing="xy")
+    x_flat = grid_x.reshape(-1, 1)
+    t_flat = grid_t.reshape(-1, 1)
+    with torch.no_grad():
+        predicted = model(x_flat, t_flat).reshape(grid_x.shape)
+        true = field_fn(x_flat, t_flat).reshape(grid_x.shape)
+    return grid_x.numpy(), grid_t.numpy(), predicted.numpy(), true.numpy()
+
+
+def evaluate_field_slice(
+    model: torch.nn.Module,
+    t_values: Sequence[float],
+    field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
+    x: float = 0.5,
+) -> tuple[np.ndarray, np.ndarray]:
+    # Evaluates predicted vs. true field across t_values at a fixed x -- the numeric half of the
+    # pointwise checks this project has hand-tabulated as CLAUDE.md markdown tables since issue
+    # #23; mx_viz.fields.plot_field_slice turns the same arrays into a line plot.
+    t = torch.tensor(t_values, dtype=torch.float32).reshape(-1, 1)
+    x_t = torch.full_like(t, x)
+    with torch.no_grad():
+        predicted = model(x_t, t).reshape(-1)
+        true = field_fn(x_t, t).reshape(-1)
+    return predicted.numpy(), true.numpy()
 
 
 def main() -> None:
