@@ -146,6 +146,7 @@ periods collapses to a degenerate near-constant output; what fixes it?
 | issue | question | verdict | where |
 |---|---|---|---|
 | #20 | Does pseudo-sequence tokenization (PINNsFormer) beat the raw-coordinate baseline? | 🔻 markedly worse | `experiments/020-pseudo-sequence-tokenization.md` |
+| #46 | Does capacity help resolve a local dielectric-interface derivative kink, in contrast to issue #25's negative global-spectral-content finding? | ⚠️ real but modest, reduced-scope result | `experiments/046-dielectric-interface-capacity.md` |
 
 ## Open leads
 
@@ -201,10 +202,23 @@ stale.
   discarded outright (`034-ntk-reweighted-long-horizon.md` lead #1) —
   untried.
 
-**New/emerging (not yet threaded to an existing folder):**
+**dielectric-interface-capacity:**
 - Does capacity help resolve a *local* dielectric-interface kink, in
   contrast to its established irrelevance to *global* spectral content
-  (issue #25)? Queued as **issue #46**.
+  (issue #25)? ✅/⚠️ resolved with a caveat: capacity gives a real,
+  monotonic-on-average improvement here (unlike #25), but this issue's
+  numbers use a reduced 3-capacity/2-seed/600-step budget because of
+  transient sandbox CPU contention -- see
+  `046-dielectric-interface-capacity.md`. Rerunning the full
+  `{16,32,64,128,256}` x 4-seed x 4000-step convention whenever more
+  time/compute is available is still open.
+- The pointwise diagnosis found capacity reduces error roughly
+  uniformly across distance from the interface rather than
+  disproportionately at the interface itself -- an explicit
+  interface-localized loss term (denser collocation right at the
+  interface, or a soft penalty directly on the curvature-jump
+  condition) is untried and might close the interface-specific gap
+  faster than capacity alone.
 
 ## Known deferred items
 

@@ -5,6 +5,8 @@ from collections.abc import Callable
 import torch
 from pytorch_optimizer import SOAP
 
+from em_piml.dielectric import PERIOD as DIELECTRIC_PERIOD
+from em_piml.dielectric import analytical_field_dielectric, pde_residual_dielectric
 from em_piml.model import CavityPINN, FourierCavityPINN, PseudoSequenceCavityPINN, _pseudo_sequence
 from em_piml.physics import PERIOD, C, L, analytical_field, analytical_field_two_mode, pde_residual
 
@@ -728,6 +730,72 @@ def train_cavity_ntk_reweighted_long_horizon(
     return _train_pinn_adam_ntk_reweighted(
         model, steps, n_collocation, n_boundary, n_initial, lr, t_max, update_every, alpha
     )
+
+
+def _dielectric_pinn_loss(
+    model: torch.nn.Module,
+    x_c: torch.Tensor,
+    t_c: torch.Tensor,
+    x_b0: torch.Tensor,
+    x_bl: torch.Tensor,
+    t_b: torch.Tensor,
+    x_i: torch.Tensor,
+    t_i: torch.Tensor,
+) -> torch.Tensor:
+    # issue #46: same four-term loss shape as _pinn_loss, but the PDE residual uses the
+    # piecewise-eps(x) wave equation (pde_residual_dielectric) and IC/IC-dot are supervised
+    # against the kinked reference solution (analytical_field_dielectric) instead of the
+    # homogeneous-cavity one -- everything else (BC terms, loss structure) is unchanged.
+    loss_pde = (pde_residual_dielectric(model, x_c, t_c) ** 2).mean()
+    loss_bc = (model(x_b0, t_b) ** 2).mean() + (model(x_bl, t_b) ** 2).mean()
+    loss_ic = ((model(x_i, t_i) - analytical_field_dielectric(x_i, t_i)) ** 2).mean()
+
+    t_i_grad = t_i.clone().requires_grad_(True)
+    e_i = model(x_i, t_i_grad)
+    e_i_dot = torch.autograd.grad(
+        e_i, t_i_grad, grad_outputs=torch.ones_like(e_i), create_graph=True
+    )[0]
+    loss_ic_dot = (e_i_dot**2).mean()  # dE/dt(x,0)=0 holds here too: cos(OMEGA*t) at t=0
+
+    return loss_pde + loss_bc + loss_ic + loss_ic_dot
+
+
+def _train_dielectric_pinn_adam(
+    model: torch.nn.Module,
+    steps: int,
+    n_collocation: int,
+    n_boundary: int,
+    n_initial: int,
+    lr: float,
+) -> torch.nn.Module:
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    for _ in range(steps):
+        optimizer.zero_grad()
+        points = _sample_points(n_collocation, n_boundary, n_initial, t_max=DIELECTRIC_PERIOD)
+        loss = _dielectric_pinn_loss(model, *points)
+        loss.backward()
+        optimizer.step()
+    return model
+
+
+def train_dielectric_cavity(
+    hidden: int = 64,
+    num_layers: int = 3,
+    steps: int = 4000,
+    seed: int = 0,
+    n_collocation: int = 200,
+    n_boundary: int = 64,
+    n_initial: int = 64,
+    lr: float = 3e-3,
+) -> CavityPINN:
+    # issue #46: same CavityPINN architecture family/training recipe as train_cavity_baseline
+    # (plain coordinate MLP, Adam, same step/point-count/lr defaults) -- hidden is the swept
+    # capacity variable (num_layers held fixed at 3, the baseline depth), everything else held at
+    # the project's standard single-mode recipe so this is a controlled comparison against #25's
+    # capacity finding, not a differently-tuned training setup entangled with the new physics.
+    torch.manual_seed(seed)
+    model = CavityPINN(hidden=hidden, num_layers=num_layers)
+    return _train_dielectric_pinn_adam(model, steps, n_collocation, n_boundary, n_initial, lr)
 
 
 def evaluate_relative_l2_error(
