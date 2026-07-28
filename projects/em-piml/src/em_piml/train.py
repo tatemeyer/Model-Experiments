@@ -1006,6 +1006,110 @@ def train_cavity_neusa_long_horizon(
     return _train_pinn_neusa(model, steps, lr, train_t_max)
 
 
+def _r3_update_pool(
+    x_c: torch.Tensor,
+    t_c: torch.Tensor,
+    residual: torch.Tensor,
+    n_collocation: int,
+    t_max: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # Daw, Bu, Wang, Perdikaris, Karpatne, "Mitigating Propagation Failures in Physics-Informed
+    # Neural Networks using Retain-Resample-Release (R3) Sampling" (ICML 2023, arXiv:2207.02338):
+    # retain the points in the current pool whose |residual| exceeds the pool's own mean |residual|
+    # (the paper's threshold tau_i, recomputed every iteration from the current population -- not a
+    # fixed global constant), release the rest, and resample fresh uniform-random points to refill
+    # the pool back to n_collocation. Unlike uniform-random resampling every step (this project's
+    # existing convention for every other long-horizon variant), points near a persistently
+    # high-residual region accumulate across steps instead of being redrawn away every time --
+    # that's the "retain" property (paper's Theorem 4.1). Using a strict ">" against the pool's own
+    # mean guarantees the resampled set is never empty (paper's Theorem 4.2, "Non-Empty Theorem"):
+    # not every point in a finite population can exceed its own mean, so at least one point is
+    # always released and replaced.
+    abs_residual = residual.detach().abs().squeeze(-1)
+    tau_i = abs_residual.mean()
+    retain_mask = abs_residual > tau_i
+    x_retain = x_c[retain_mask]
+    t_retain = t_c[retain_mask]
+    n_resample = n_collocation - x_retain.shape[0]
+    x_new = torch.rand(n_resample, 1) * L
+    t_new = torch.rand(n_resample, 1) * t_max
+    return torch.cat([x_retain, x_new]), torch.cat([t_retain, t_new])
+
+
+def _train_pinn_adam_r3(
+    model: torch.nn.Module,
+    steps: int,
+    n_collocation: int,
+    n_boundary: int,
+    n_initial: int,
+    lr: float,
+    t_max: float,
+    field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
+) -> torch.nn.Module:
+    # R3 (see _r3_update_pool) only changes how the *collocation* (PDE-residual) points evolve
+    # across steps -- BC/IC points stay freshly uniform-random every step, unchanged from every
+    # other long-horizon variant in this thread, per issue #37's "sampling strategy is the only
+    # variable" constraint. The collocation pool starts as a plain uniform-random draw (same
+    # distribution _sample_points would give at step 0) and evolves via retain-resample-release
+    # from there.
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    x_c = torch.rand(n_collocation, 1) * L
+    t_c = torch.rand(n_collocation, 1) * t_max
+
+    for _ in range(steps):
+        optimizer.zero_grad()
+        t_b = torch.rand(n_boundary, 1) * t_max
+        x_b0 = torch.zeros(n_boundary, 1)
+        x_bl = torch.full((n_boundary, 1), L)
+        x_i = torch.rand(n_initial, 1) * L
+        t_i = torch.zeros(n_initial, 1)
+
+        residual = pde_residual(model, x_c, t_c)
+        loss_pde = (residual**2).mean()
+        loss_bc = (model(x_b0, t_b) ** 2).mean() + (model(x_bl, t_b) ** 2).mean()
+        loss_ic = ((model(x_i, t_i) - field_fn(x_i, t_i)) ** 2).mean()
+
+        t_i_grad = t_i.clone().requires_grad_(True)
+        e_i = model(x_i, t_i_grad)
+        e_i_dot = torch.autograd.grad(
+            e_i, t_i_grad, grad_outputs=torch.ones_like(e_i), create_graph=True
+        )[0]
+        loss_ic_dot = (e_i_dot**2).mean()
+
+        loss = loss_pde + loss_bc + loss_ic + loss_ic_dot
+        loss.backward()
+        optimizer.step()
+
+        # Retain-resample-release for the *next* step, reusing this step's already-computed
+        # residual (pre-update) -- no extra forward pass, matching the paper's own claim that R3
+        # adds negligible computational overhead over uniform resampling.
+        x_c, t_c = _r3_update_pool(x_c, t_c, residual, n_collocation, t_max)
+
+    return model
+
+
+def train_cavity_r3_long_horizon(
+    steps: int = 4000,
+    seed: int = 0,
+    n_collocation: int = 200,
+    n_boundary: int = 64,
+    n_initial: int = 64,
+    lr: float = 3e-3,
+    horizon_periods: float = 5.0,
+) -> CavityPINN:
+    # issue #37: same shipped architecture/step budget/point counts/lr as
+    # train_cavity_long_horizon (issue #23) -- the only variable is swapping uniform-random
+    # collocation resampling for R3's retain-resample-release scheme (_train_pinn_adam_r3), per
+    # Daw et al. (arXiv:2207.02338). A genuinely different mechanism than #23/#30/#32/#34/#35
+    # (loss-reweighting, architecture, training schedule, and an anti-trivial-solution penalty,
+    # respectively) or #36 (a different architecture family) -- this is the first attempt at the
+    # collocation-sampling strategy itself.
+    torch.manual_seed(seed)
+    model = CavityPINN(hidden=32, num_layers=3)
+    t_max = horizon_periods * PERIOD
+    return _train_pinn_adam_r3(model, steps, n_collocation, n_boundary, n_initial, lr, t_max)
+
+
 def _dielectric_pinn_loss(
     model: torch.nn.Module,
     x_c: torch.Tensor,
@@ -1161,6 +1265,7 @@ def main() -> None:
     long_horizon_ntk = train_cavity_ntk_reweighted_long_horizon()
     long_horizon_antitrivial = train_cavity_antitrivial_long_horizon()
     long_horizon_neusa = train_cavity_neusa_long_horizon()
+    long_horizon_r3 = train_cavity_r3_long_horizon()
     t_max = 5.0 * PERIOD
     long_horizon_err = evaluate_relative_l2_error(long_horizon, t_max=t_max)
     long_horizon_causal_err = evaluate_relative_l2_error(long_horizon_causal, t_max=t_max)
@@ -1171,6 +1276,7 @@ def main() -> None:
     long_horizon_ntk_err = evaluate_relative_l2_error(long_horizon_ntk, t_max=t_max)
     long_horizon_antitrivial_err = evaluate_relative_l2_error(long_horizon_antitrivial, t_max=t_max)
     long_horizon_neusa_err = evaluate_relative_l2_error(long_horizon_neusa, t_max=t_max)
+    long_horizon_r3_err = evaluate_relative_l2_error(long_horizon_r3, t_max=t_max)
     print(f"long-horizon (uniform)         relative L2 error: {long_horizon_err:.4f}")
     print(f"long-horizon (causal)          relative L2 error: {long_horizon_causal_err:.4f}")
     print(
@@ -1181,6 +1287,7 @@ def main() -> None:
     print(f"long-horizon (NTK-reweighted)  relative L2 error: {long_horizon_ntk_err:.4f}")
     print(f"long-horizon (anti-trivial)    relative L2 error: {long_horizon_antitrivial_err:.4f}")
     print(f"long-horizon (NeuSA)           relative L2 error: {long_horizon_neusa_err:.4f}")
+    print(f"long-horizon (R3)              relative L2 error: {long_horizon_r3_err:.4f}")
 
 
 if __name__ == "__main__":
