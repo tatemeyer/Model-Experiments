@@ -9,7 +9,7 @@ from em_piml.model import CavityPINN, FourierCavityPINN, PseudoSequenceCavityPIN
 from em_piml.physics import PERIOD, C, L, analytical_field, analytical_field_two_mode, pde_residual
 
 
-def _pinn_loss(
+def _pinn_loss_components(
     model: torch.nn.Module,
     x_c: torch.Tensor,
     t_c: torch.Tensor,
@@ -19,11 +19,14 @@ def _pinn_loss(
     x_i: torch.Tensor,
     t_i: torch.Tensor,
     field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     # field_fn defaults to the single-mode analytical_field (existing behavior, unaffected);
     # issue #22's two-mode training functions pass analytical_field_two_mode instead — dE/dt(x,0)
     # = 0 still holds for that target too (each mode's cos(.) has zero time-derivative at t=0, so
     # the sum's does too), so loss_ic_dot below needs no field_fn-specific change.
+    # Split out from _pinn_loss (issue #34) so the NTK-reweighting training loop can compute each
+    # term's own gradient norm separately -- every other caller still goes through _pinn_loss,
+    # unaffected.
     loss_pde = (pde_residual(model, x_c, t_c) ** 2).mean()
     loss_bc = (model(x_b0, t_b) ** 2).mean() + (model(x_bl, t_b) ** 2).mean()
     loss_ic = ((model(x_i, t_i) - field_fn(x_i, t_i)) ** 2).mean()
@@ -35,6 +38,23 @@ def _pinn_loss(
     )[0]
     loss_ic_dot = (e_i_dot**2).mean()  # dE/dt(x, 0) = 0 for this standing-wave mode
 
+    return loss_pde, loss_bc, loss_ic, loss_ic_dot
+
+
+def _pinn_loss(
+    model: torch.nn.Module,
+    x_c: torch.Tensor,
+    t_c: torch.Tensor,
+    x_b0: torch.Tensor,
+    x_bl: torch.Tensor,
+    t_b: torch.Tensor,
+    x_i: torch.Tensor,
+    t_i: torch.Tensor,
+    field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
+) -> torch.Tensor:
+    loss_pde, loss_bc, loss_ic, loss_ic_dot = _pinn_loss_components(
+        model, x_c, t_c, x_b0, x_bl, t_b, x_i, t_i, field_fn=field_fn
+    )
     return loss_pde + loss_bc + loss_ic + loss_ic_dot
 
 
@@ -616,6 +636,100 @@ def train_cavity_curriculum_long_horizon(
     return model
 
 
+def _grad_norm(loss: torch.Tensor, params: list[torch.nn.Parameter]) -> torch.Tensor:
+    # L2 norm of d(loss)/d(params), flattened across all parameter tensors. allow_unused=True
+    # because loss_ic_dot's graph only touches the layers t actually flows through in this simple
+    # MLP -- in practice every loss term here touches every parameter (the whole network sits
+    # between input and output), but this is defensive rather than assumed.
+    grads = torch.autograd.grad(loss, params, retain_graph=True, allow_unused=True)
+    total = torch.zeros(())
+    for g in grads:
+        if g is not None:
+            total = total + g.pow(2).sum()
+    return total.sqrt()
+
+
+def _train_pinn_adam_ntk_reweighted(
+    model: torch.nn.Module,
+    steps: int,
+    n_collocation: int,
+    n_boundary: int,
+    n_initial: int,
+    lr: float,
+    t_max: float,
+    update_every: int = 10,
+    alpha: float = 0.9,
+    field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
+) -> torch.nn.Module:
+    # NTK-based adaptive loss-term reweighting (Wang, Teng, Perdikaris, "Understanding and
+    # Mitigating Gradient Flow Pathologies in Physics-Informed Neural Networks," SIAM J. Sci.
+    # Comput. 2021, arXiv:2001.04536, Algorithm 1 -- the paper's practical "learning rate
+    # annealing" scheme, motivated by their NTK eigenvalue analysis). Unlike issue #23's causal
+    # reweighting (which only reweights the PDE-residual term across time chunks) or issue #32's
+    # curriculum (which changes the training schedule, not the loss balance), this rebalances the
+    # *global* weight of each non-PDE loss term against the PDE-residual term's own gradient
+    # magnitude: every update_every steps, each term i's weight is nudged toward
+    # hat_lambda_i = max(|grad(loss_pde)|) / mean(|grad(loss_i)|) (approximated here via the L2
+    # norm rather than a per-parameter max/mean, since this project's network is small enough that
+    # this is a reasonable proxy and avoids per-parameter bookkeeping the paper's own public
+    # implementations don't require either), smoothed via an exponential moving average
+    # (weight_i <- (1 - alpha) * weight_i + alpha * hat_lambda_i, alpha=0.9 per the paper) so a
+    # single noisy step doesn't cause the weights to swing wildly. loss_pde's own weight stays
+    # fixed at 1.0 (the reference term every other term is balanced against, per the paper).
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    params = list(model.parameters())
+    weight_bc, weight_ic, weight_ic_dot = 1.0, 1.0, 1.0
+    eps = 1e-8
+
+    for step in range(steps):
+        optimizer.zero_grad()
+        points = _sample_points(n_collocation, n_boundary, n_initial, t_max=t_max)
+        loss_pde, loss_bc, loss_ic, loss_ic_dot = _pinn_loss_components(
+            model, *points, field_fn=field_fn
+        )
+
+        if step % update_every == 0:
+            g_pde = _grad_norm(loss_pde, params)
+            g_bc = _grad_norm(loss_bc, params)
+            g_ic = _grad_norm(loss_ic, params)
+            g_ic_dot = _grad_norm(loss_ic_dot, params)
+            hat_bc = (g_pde / (g_bc + eps)).item()
+            hat_ic = (g_pde / (g_ic + eps)).item()
+            hat_ic_dot = (g_pde / (g_ic_dot + eps)).item()
+            weight_bc = (1 - alpha) * weight_bc + alpha * hat_bc
+            weight_ic = (1 - alpha) * weight_ic + alpha * hat_ic
+            weight_ic_dot = (1 - alpha) * weight_ic_dot + alpha * hat_ic_dot
+
+        loss = loss_pde + weight_bc * loss_bc + weight_ic * loss_ic + weight_ic_dot * loss_ic_dot
+        loss.backward()
+        optimizer.step()
+
+    return model
+
+
+def train_cavity_ntk_reweighted_long_horizon(
+    steps: int = 4000,
+    seed: int = 0,
+    n_collocation: int = 200,
+    n_boundary: int = 64,
+    n_initial: int = 64,
+    lr: float = 3e-3,
+    horizon_periods: float = 5.0,
+    update_every: int = 10,
+    alpha: float = 0.9,
+) -> CavityPINN:
+    # issue #34: same shipped architecture/step budget/point counts/lr as
+    # train_cavity_long_horizon (issue #23) -- the only variable is per-loss-term weighting via
+    # NTK-based adaptive reweighting (see _train_pinn_adam_ntk_reweighted) instead of issue #23's
+    # causal per-time-chunk reweighting or uniform weighting.
+    torch.manual_seed(seed)
+    model = CavityPINN(hidden=32, num_layers=3)
+    t_max = horizon_periods * PERIOD
+    return _train_pinn_adam_ntk_reweighted(
+        model, steps, n_collocation, n_boundary, n_initial, lr, t_max, update_every, alpha
+    )
+
+
 def evaluate_relative_l2_error(
     model: torch.nn.Module,
     seed: int = 123,
@@ -657,6 +771,7 @@ def main() -> None:
     long_horizon_causal = train_cavity_causal_long_horizon()
     long_horizon_pseudo_sequence = train_pseudo_sequence_cavity_long_horizon()
     long_horizon_curriculum = train_cavity_curriculum_long_horizon()
+    long_horizon_ntk = train_cavity_ntk_reweighted_long_horizon()
     t_max = 5.0 * PERIOD
     long_horizon_err = evaluate_relative_l2_error(long_horizon, t_max=t_max)
     long_horizon_causal_err = evaluate_relative_l2_error(long_horizon_causal, t_max=t_max)
@@ -664,6 +779,7 @@ def main() -> None:
         long_horizon_pseudo_sequence, t_max=t_max
     )
     long_horizon_curriculum_err = evaluate_relative_l2_error(long_horizon_curriculum, t_max=t_max)
+    long_horizon_ntk_err = evaluate_relative_l2_error(long_horizon_ntk, t_max=t_max)
     print(f"long-horizon (uniform)         relative L2 error: {long_horizon_err:.4f}")
     print(f"long-horizon (causal)          relative L2 error: {long_horizon_causal_err:.4f}")
     print(
@@ -671,6 +787,7 @@ def main() -> None:
         f"{long_horizon_pseudo_sequence_err:.4f}"
     )
     print(f"long-horizon (curriculum)      relative L2 error: {long_horizon_curriculum_err:.4f}")
+    print(f"long-horizon (NTK-reweighted)  relative L2 error: {long_horizon_ntk_err:.4f}")
 
 
 if __name__ == "__main__":

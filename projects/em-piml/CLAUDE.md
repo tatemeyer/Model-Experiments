@@ -222,3 +222,4 @@ stale.
 - The `num_bands=4/6` instability is now mostly explained and resolved
   (see the `num-bands-gap` thread above) but two leads remain open there
   (FP32 precision artifact, quasi-random sampling).
+
