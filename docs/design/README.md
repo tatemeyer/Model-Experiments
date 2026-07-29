@@ -73,7 +73,7 @@ finished.
 In a solo/small-research-repo context, "different departments for QA" cashes
 out as distinct reviewer *lenses* applied to the same document, not literal
 org units. Every revision carries a `## Gates — Rev-<letter>` checklist
-against these five:
+against these six:
 
 1. **Technical feasibility** — do the named prerequisites actually exist, or
    have a credible path to existing, before work that depends on them
@@ -88,6 +88,11 @@ against these five:
    silently drifting from them?
 5. **Goal-delivery** — does the scope, as written, actually get to the
    stated outcome, or does it quietly narrow/drift?
+6. **Security** — credentials/secrets handling, supply-chain risk from new
+   dependencies, and any surface a cloud-compute or live-visualization
+   component opens up — reviewed by back-tracing from the intended finished
+   product to what the spec currently says, not just checked against a
+   generic checklist.
 
 ## Frontmatter every spec document carries
 
@@ -131,5 +136,5 @@ lives entirely inside `docs/design/specs/`, not in Issues.
 | Slice | A concrete, Issue/PR-sized unit of implementable work. |
 | Revision | A lettered draft (Rev-A, Rev-B, ...) of a document, in review. |
 | Rev-0 | The frozen, final revision — read-only by convention after this point. |
-| Gate | One of the five review lenses a revision must clear before advancing. |
+| Gate | One of the six review lenses a revision must clear before advancing. |
 | Change Order | A new document amending a Rev-0 document; goes through its own Rev-A → Rev-0 cycle. |

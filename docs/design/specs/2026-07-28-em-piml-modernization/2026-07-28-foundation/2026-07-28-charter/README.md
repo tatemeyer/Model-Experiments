@@ -3,9 +3,9 @@ title: "Design Charter — em-piml Modernization"
 design: 2026-07-28-em-piml-modernization
 arc: 2026-07-28-foundation
 slice: 2026-07-28-charter
-revision: A
+revision: B
 status: draft
-date: 2026-07-28
+date: 2026-07-29
 related-arcs: [rerun-visualization, jax-migration, cloud-compute-ops, device-abstraction]
 supersedes: null
 superseded-by: null
@@ -120,7 +120,14 @@ anywhere in `projects/em-piml/src/em_piml/` today — no `.cuda()` call, no
 tensor is implicitly CPU. Both `jax-migration` and `cloud-compute-ops` need
 a real device-abstraction layer to mean anything in practice; without it,
 "commit to JAX" and "set up cloud GPU access" are each individually
-incomplete.
+incomplete. All data trained on under any Arc in this Design is synthetic
+or analytically-generated in-repo (via `mx-data`, e.g.
+`em-piml-1d-cavity-analytical`) — no sensitive, proprietary, or personally
+identifiable data is shipped to third-party rented compute under
+`cloud-compute-ops`. If a future experiment ever needs non-synthetic data,
+that changes this constraint and must be re-flagged as a Security-gate item
+before compute is provisioned. *(Added in Rev-B, Security gate finding —
+see §13.)*
 
 ## 4. Reconciliation with existing `CONVENTIONS.md` entries
 
@@ -155,13 +162,45 @@ own Arc Charter:
   explicitly justifies paid compute.
 - No hosted/live-viewer dashboard as a required artifact — Rerun's
   recording-file mode, not its live-streaming mode, unless a later revision
-  explicitly revisits this.
+  explicitly revisits this. `rerun-visualization`'s Arc Charter must specify
+  how recording-only mode is *enforced*, not just stated — e.g. a single
+  shared logging helper in `mx-viz` that wraps `rr.save(...)`/file-mode
+  logging as the only sanctioned entry point, with `rr.connect`/`rr.serve`-style
+  live-mode calls flagged in code review as an explicit deviation requiring
+  this section's own exception clause. *(Added in Rev-B, Security gate
+  finding — see §13.)*
 - Docs stay agent-first everywhere else in the repo (`CLAUDE.md:77-81`) —
   this spec tree is an explicit, bounded exception to that terseness bias,
   confined to `docs/design/specs/`.
 - The existing PR-gating CI (`.github/workflows/ci.yml`, single `ubuntu-latest`
   job, no GPU runner, no matrix) stays CPU-only and unchanged unless an Arc
   explicitly proposes and justifies a change to it.
+- **Any PR that adds, modifies, or references a GitHub Actions secret,
+  Environment, or CI workflow file must carry `autonomy:review`, never
+  `autonomy:safe`, regardless of how small the diff looks** — this is a
+  standing exception to normal autonomy-labeling and applies for the life
+  of this Design, not just this document's current revision, because
+  `auto-merge.yml` merges on
+  green CI with zero human review, and a mislabeled small-looking diff to
+  CI/secrets territory would otherwise land on `main` unreviewed. *(Added
+  in Rev-B, Security gate finding — see §13.)*
+- **Every new third-party dependency added under this Design** (any
+  ecosystem — PyPI, the Rerun SDK, cloud provider CLIs) gets the same
+  license-file-not-just-metadata check applied to `jaxpi` in §3, recorded
+  in the Slice PR that adds it. Unofficial/community forks or ports of a
+  library (e.g. a JAX port of `pytorch_optimizer.SOAP`, see §7) require an
+  explicit maintenance/provenance note, not just a license check, before
+  being added to `uv.lock`. *(Added in Rev-B, Security gate finding — see
+  §13.)*
+- **`cloud-compute-ops`'s Arc Charter must specify a local-credential
+  convention before any provider integration lands**: extend `.gitignore`'s
+  Secrets section to cover each provider's actual credential filename
+  pattern (e.g. `kaggle.json`, `*-service-account*.json`,
+  `client_secrets.json` — none of which the current `.env`/`*.pem`/`*.key`
+  patterns catch), and state explicitly that credentials are never pasted
+  into a notebook cell that gets committed or exported into
+  `docs/design/` or `projects/em-piml/experiments/`. *(Added in Rev-B,
+  Security gate finding — see §13.)*
 - Everything outside this Design's own tree is untouched by this process
   (§2).
 
@@ -182,11 +221,13 @@ are individually incomplete without it.
 ## 7. Cross-cutting gaps surfaced by research (surfaced, not yet assigned)
 
 - **No mature JAX equivalent of `pytorch_optimizer.SOAP`** (only an
-  unofficial third-party port exists) or of `torch.optim.LBFGS` with
-  `strong_wolfe` line search (`jaxopt` is sunset; `optax.lbfgs` and
-  `optimistix.BFGS` use different, unverified-equivalent line-search
-  strategies). SOAP is this repo's single most load-bearing optimizer
-  result — it fully closed the `num_bands=4` instability
+  unofficial third-party port exists — subject to §5's provenance-note
+  requirement, since it's exactly the "unofficial fork" case that bullet
+  names) or of `torch.optim.LBFGS` with `strong_wolfe` line search
+  (`jaxopt` is sunset; `optax.lbfgs` and `optimistix.BFGS` use different,
+  unverified-equivalent line-search strategies). SOAP is this repo's single
+  most load-bearing optimizer result — it fully closed the `num_bands=4`
+  instability
   (`projects/em-piml/experiments/num-bands-gap/011-soap-optimizer.md`).
   `jax-migration`'s Arc Charter needs to address this directly, not assume
   it away.
@@ -196,12 +237,20 @@ are individually incomplete without it.
   thing in this repo to actually need it (`.github/SETUP.md:153-158`
   similarly flags Environments as "not needed yet... revisit if/when a
   project publishes something" — cloud-compute credential scoping is a
-  reasonable trigger for that revisit too).
+  reasonable trigger for that revisit too). `cloud-compute-ops`'s Arc
+  Charter must state, per provider, the minimum viable credential scope
+  (e.g. a GCP service account restricted to the specific TRC project, not
+  a broad project-editor role) and a revocation step (where in each
+  provider's console a leaked credential gets revoked) before any
+  credential is actually issued — see also §5's local-credential-convention
+  and autonomy-labeling bullets. *(Rotation/revocation requirement added in
+  Rev-B, Security gate finding — see §13.)*
 - **CI implications are undecided.** Does GPU/cloud-compute work stay
   entirely outside the existing PR-gating CI (interactive/manually
   triggered only), or does a new, separate, non-blocking workflow get
   added? Not decided by this Charter — assigned to `cloud-compute-ops`'s
-  Arc Charter.
+  Arc Charter, which inherits §5's `autonomy:review`-for-CI/secrets-diffs
+  carve-out regardless of which way this is decided.
 
 ## 8. Relationship to the Issue/PR loop
 
@@ -215,18 +264,26 @@ No epics are introduced into the Issue tracker.
 ## 9. Process recap
 
 See `docs/design/README.md` for the full definition of the Design/Arc/Slice
-hierarchy, the Rev-A → Rev-0 lifecycle, Change Orders, the five review
+hierarchy, the Rev-A → Rev-0 lifecycle, Change Orders, the six review
 lenses, and a glossary.
 
-## 10. Gates — Rev-A
+## 10. Gates — Rev-B
 
 - [ ] Technical feasibility
 - [ ] License/compliance
 - [ ] Cost/compute-budget
 - [ ] Convention-alignment
 - [ ] Goal-delivery
+- [x] Security — reviewed against Rev-A; 6 findings (1 Critical, 2 High, 2
+      Medium, 1 Low), all incorporated into this revision. See §13 for the
+      full findings log. Re-review recommended once an Arc Charter is
+      written against the new constraints, to confirm the remedies as
+      *worded* actually hold up once there's real content to check them
+      against — this sign-off covers the Charter text, not any future
+      implementation.
 
-Reviewer notes: _(pending)_
+Reviewer notes: Security gate cleared for Rev-B content. Remaining five
+gates not yet reviewed.
 
 ## 11. Open questions deferred to Rev-B
 
@@ -252,8 +309,31 @@ gap in §7 turns out unbridgeable for `jax-migration`), recorded as a
 lightweight `status: abandoned` change at the Arc level, not a Change Order.
 Change Orders exist only to amend content that already reached Rev-0.
 
+## 13. Security review findings (Rev-A → Rev-B)
+
+Performed by a dedicated Security-gate review agent, back-tracing from each
+Arc's envisioned finished state to what Rev-A actually specified. Full
+justification for each finding lived in the review itself; this table is
+the permanent audit trail of what was found and where it's now addressed.
+
+| # | Finding | Severity | Addressed in |
+|---|---|---|---|
+| 1 | No carve-out from `autonomy:safe` auto-merge for CI/secrets-touching diffs — a mislabeled small diff could merge to `main` with zero human review | Critical | §5 (autonomy:review carve-out bullet) |
+| 2 | No local-credential-hygiene convention for `cloud-compute-ops` providers (`kaggle.json`, GCP service-account JSON not covered by current `.gitignore` patterns) | High | §5 (local-credential-convention bullet) |
+| 3 | Dependency-vetting rigor applied to `jaxpi` (§3) doesn't generalize to other new packages this Design adds | High | §5 (dependency-vetting bullet), §7 (SOAP bullet cross-reference) |
+| 4 | No rotation/revocation story if a cloud credential leaks | Medium | §7 (credentials bullet) |
+| 5 | Rerun "recording-only" constraint is stated intent with no enforcement mechanism | Medium | §5 (Rerun bullet, enforcement mechanism) |
+| 6 | Training-data sensitivity for rented compute never explicitly confirmed in writing | Low | §3 (`device-abstraction` paragraph) |
+
+Overall Security-gate verdict on Rev-A (verbatim from the review): none of
+the findings required rethinking `cloud-compute-ops`'s scope itself — the
+provider choices are sound and consistent with `CONVENTIONS.md`'s compute
+assumption — they required the handful of additional constraints now
+incorporated above.
+
 ## Revision History
 
 | Rev | Date | Summary of changes | Gates cleared |
 |---|---|---|---|
 | A | 2026-07-28 | Initial draft | (pending) |
+| B | 2026-07-29 | Security gate review (6 findings) incorporated: autonomy-label carve-out for CI/secrets diffs, local-credential-hygiene convention, generalized dependency-vetting bar, credential rotation/revocation requirement, Rerun recording-only enforcement mechanism, training-data-sensitivity confirmation. Fixed a stale "five lenses" cross-reference in §9. | Security |
