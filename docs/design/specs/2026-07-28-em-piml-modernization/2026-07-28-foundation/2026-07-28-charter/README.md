@@ -3,7 +3,7 @@ title: "Design Charter — em-piml Modernization"
 design: 2026-07-28-em-piml-modernization
 arc: 2026-07-28-foundation
 slice: 2026-07-28-charter
-revision: B
+revision: C
 status: draft
 date: 2026-07-29
 related-arcs: [rerun-visualization, jax-migration, cloud-compute-ops, device-abstraction]
@@ -59,7 +59,9 @@ that loop's single-Issue shape, not because the loop itself is inadequate.
 ### rerun-visualization
 
 Replace/extend `mx-viz`'s current visualization capability with Rerun.io
-(`github.com/rerun-io/rerun`, Apache-2.0) as the long-term solution. `mx-viz`
+(`github.com/rerun-io/rerun`, dual-licensed MIT/Apache-2.0 — corrected in
+Rev-C, License/compliance gate finding, see §13) as the long-term solution.
+`mx-viz`
 today (`tools/viz/src/mx_viz/`, 240 lines across `fields.py`, `training.py`,
 `sweeps.py`, `io.py`, `cli.py`) produces static matplotlib PNGs only — no
 time-axis motion, no live view into a training run, no way to watch e.g.
@@ -93,9 +95,24 @@ written approval. This repo will study `jaxpi`'s implementations of causal
 weighting, RWF, PirateNets, and NTK reweighting for correctness, then
 reimplement the underlying papers' techniques directly in this repo's own
 JAX code — the same pattern this repo already uses for every other paper it
-tests, and it sidesteps the license question entirely. `train.py` (1294
-lines, every training-loop variant across ~10 experiments) is the dominant
-migration surface.
+tests, and it sidesteps the license question entirely. **"Reimplement" means
+deriving from the cited papers' equations/algorithms — `jaxpi`'s source may
+be read for correctness verification but must not be copied, adapted
+line-by-line, or have its comments/variable/function names carried into
+this repo's code; a Slice PR that reimplements RWF, PirateNets, or NTK
+reweighting must cite the paper, not `jaxpi`'s file/function, as its source
+of truth.** *(Added in Rev-C, License/compliance gate finding — see §13.)*
+`train.py` (1294 lines, every training-loop variant across ~10 experiments)
+is the dominant migration surface.
+
+**License check of this arc's own primary new dependencies (§5's
+dependency-vetting bar, exercised on the record here rather than deferred
+entirely):** `jax`/`jaxlib` (`google/jax`), `optax`
+(`google-deepmind/optax`), `equinox` (`patrick-kidger/equinox`), and
+`diffrax` (`patrick-kidger/diffrax`) were each checked against their actual
+upstream `LICENSE` file, not just package metadata — all four are genuine
+Apache License 2.0, no `jaxpi`-style setup.py/LICENSE mismatch found. *(Added
+in Rev-C, License/compliance gate finding — see §13.)*
 
 ### cloud-compute-ops
 
@@ -189,8 +206,26 @@ own Arc Charter:
   license-file-not-just-metadata check applied to `jaxpi` in §3, recorded
   in the Slice PR that adds it. Unofficial/community forks or ports of a
   library (e.g. a JAX port of `pytorch_optimizer.SOAP`, see §7) require an
-  explicit maintenance/provenance note, not just a license check, before
-  being added to `uv.lock`. *(Added in Rev-B, Security gate finding — see
+  explicit maintenance/provenance note **and** must independently pass the
+  same license-file check as any other dependency — the provenance note is
+  additive to that check, not a substitute for it. Apache-2.0's
+  NOTICE-preservation clause (relevant to Rerun's Apache option and most of
+  the JAX ecosystem) is not currently triggered — no Arc redistributes
+  dependency source; revisit if any Arc's output (e.g.
+  `rerun-visualization`'s logging helper) is ever packaged/published
+  standalone. *(Added in Rev-B, Security gate finding; fork-bullet wording
+  tightened and NOTICE note added in Rev-C, License/compliance gate
+  finding — see §13.)*
+- **A software license check is not the same thing as a service's Terms of
+  Service.** `cloud-compute-ops`'s Arc Charter must separately record each
+  provider's Terms of Service / Acceptable Use Policy constraints relevant
+  to scripted/automated use — in particular, Colab's free-tier terms have
+  historically restricted bypassing the UI for automated use, which is in
+  direct tension with `google-colab-cli`'s core value proposition (scripted,
+  headless GPU provisioning) named in §3. Checking that `google-colab-cli`
+  itself is permissively licensed does not substitute for checking whether
+  *using* it the way this Design intends is consistent with Colab's actual
+  service terms. *(Added in Rev-C, License/compliance gate finding — see
   §13.)*
 - **`cloud-compute-ops`'s Arc Charter must specify a local-credential
   convention before any provider integration lands**: extend `.gitignore`'s
@@ -250,7 +285,10 @@ are individually incomplete without it.
   triggered only), or does a new, separate, non-blocking workflow get
   added? Not decided by this Charter — assigned to `cloud-compute-ops`'s
   Arc Charter, which inherits §5's `autonomy:review`-for-CI/secrets-diffs
-  carve-out regardless of which way this is decided.
+  carve-out regardless of which way this is decided, and which is exactly
+  where §5's provider-Terms-of-Service bullet bites hardest — scripted CI
+  usage of a free-tier provider is the case most likely to run against a
+  ToS automation restriction.
 
 ## 8. Relationship to the Issue/PR loop
 
@@ -267,25 +305,28 @@ See `docs/design/README.md` for the full definition of the Design/Arc/Slice
 hierarchy, the Rev-A → Rev-0 lifecycle, Change Orders, the six review
 lenses, and a glossary.
 
-## 10. Gates — Rev-B
+## 10. Gates — Rev-C
 
 - [ ] Technical feasibility
-- [ ] License/compliance
 - [ ] Cost/compute-budget
 - [ ] Convention-alignment
 - [ ] Goal-delivery
 - [x] Security — reviewed against Rev-A; 6 findings (1 Critical, 2 High, 2
-      Medium, 1 Low), all incorporated into this revision. See §13 for the
-      full findings log. Re-review recommended once an Arc Charter is
-      written against the new constraints, to confirm the remedies as
-      *worded* actually hold up once there's real content to check them
-      against — this sign-off covers the Charter text, not any future
-      implementation.
+      Medium, 1 Low), all incorporated in Rev-B. See §13. Re-review
+      recommended once an Arc Charter is written against the new
+      constraints, to confirm the remedies as *worded* actually hold up
+      once there's real content to check them against.
+- [x] License/compliance — reviewed against Rev-B; 7 findings (3 High, 2
+      Medium, 2 Low), all incorporated into this revision. See §13.
+      Reviewer independently verified Rerun's and the JAX ecosystem's
+      actual `LICENSE` files rather than trusting stated metadata,
+      consistent with the standard this Charter itself set with the
+      `jaxpi` catch.
 
-Reviewer notes: Security gate cleared for Rev-B content. Remaining five
-gates not yet reviewed.
+Reviewer notes: Security and License/compliance gates cleared for Rev-C
+content. Remaining four gates not yet reviewed.
 
-## 11. Open questions deferred to Rev-B
+## 11. Open questions — none decided by this Charter, deferred to a future revision or Arc Charter
 
 - Confirm `device-abstraction` as its own Arc versus folding it into
   `foundation` — this Charter recommends a standalone Arc since both
@@ -300,6 +341,18 @@ gates not yet reviewed.
 - Sequencing: should `device-abstraction` fully complete before
   `jax-migration`/`cloud-compute-ops` start, or can they proceed with a
   minimal device-abstraction slice first and iterate?
+- **Repo-wide gap, out of this Charter's scope to fix, surfaced by the
+  License/compliance gate:** this repo has no `LICENSE` file at all
+  (`licenseInfo: null` on a public GitHub repo) and no `license` field in
+  any workspace `pyproject.toml`. This predates this Design and applies to
+  every existing dependency (`torch`, `numpy`, `matplotlib`,
+  `pytorch-optimizer`) already, not something this initiative created — but
+  this Design's own dependency-vetting bar (§5) implicitly assumes "does a
+  dependency's license permit this repo's use" is a well-posed question,
+  which is harder to reason about precisely without a stated repo license.
+  Recommend tracking "state this repo's license terms" as a separate,
+  repo-wide Intent Issue, not something `docs/design/` resolves. *(Added in
+  Rev-C, License/compliance gate finding — see §13.)*
 
 ## 12. Rollback / abandonment path
 
@@ -331,9 +384,38 @@ provider choices are sound and consistent with `CONVENTIONS.md`'s compute
 assumption — they required the handful of additional constraints now
 incorporated above.
 
+## 14. License/compliance review findings (Rev-B → Rev-C)
+
+Performed by a dedicated License/compliance-gate review agent, which
+independently fetched and read the actual `LICENSE` files of Rerun and the
+core JAX-ecosystem packages (not just trusting stated metadata — the same
+standard §3's `jaxpi` catch already set) and researched the relevant cloud
+providers' Terms of Service.
+
+| # | Finding | Severity | Addressed in |
+|---|---|---|---|
+| 1 | `jaxpi` "reference-only" boundary never prohibited copying its actual code/comments/naming — only stated "reimplement" | High | §3 (`jax-migration`, new sentence) |
+| 2 | Cloud provider Terms of Service (distinct from software licenses) never addressed — Colab's free-tier terms have historically restricted the scripted automation `google-colab-cli` exists to enable | High | §5 (new ToS bullet), §7 (CI-implications cross-reference) |
+| 3 | Repo has no `LICENSE` file at all — pre-existing, repo-wide, out of this Charter's scope to fix, but was a silent assumption underpinning §5's dependency-vetting bar | High | §11 (tracked as a deferred, separately-owned open item) |
+| 4 | §5's dependency-vetting bar had never been exercised on the record against `jax-migration`'s own primary dependencies (only ever applied to `jaxpi`, which got rejected) | Medium | §3 (`jax-migration`, on-the-record license check of `jax`/`jaxlib`/`optax`/`equinox`/`diffrax`) |
+| 5 | Unofficial-fork provenance-note requirement didn't also require the fork itself to pass a license check | Medium | §5 (fork bullet tightened) |
+| 6 | Rerun's license stated as "Apache-2.0" only; actually dual-licensed MIT/Apache-2.0 | Low | §3 (`rerun-visualization`) |
+| 7 | Apache-2.0 NOTICE-preservation obligations never mentioned (correctly non-blocking at spec level, but worth closing on the record) | Low | §5 (dependency-vetting bullet) |
+
+Overall License/compliance-gate verdict on Rev-B (verbatim from the
+review): nothing found rises to a currently-accurate active violation that
+would require rethinking the initiative's scope — every provider and
+package choice independently verified (Rerun, `jax`, `jaxlib`, `optax`,
+`equinox`, `diffrax`, `google-colab-cli`) turned out to be exactly what the
+Charter assumed, and the `jaxpi` catch already on record in §3 remains
+sound. What was missing was process completeness (a copy-paste boundary, a
+ToS-vs-license distinction, an on-the-record check of the initiative's own
+primary dependencies), now closed above.
+
 ## Revision History
 
 | Rev | Date | Summary of changes | Gates cleared |
 |---|---|---|---|
 | A | 2026-07-28 | Initial draft | (pending) |
 | B | 2026-07-29 | Security gate review (6 findings) incorporated: autonomy-label carve-out for CI/secrets diffs, local-credential-hygiene convention, generalized dependency-vetting bar, credential rotation/revocation requirement, Rerun recording-only enforcement mechanism, training-data-sensitivity confirmation. Fixed a stale "five lenses" cross-reference in §9. | Security |
+| C | 2026-07-29 | License/compliance gate review (7 findings) incorporated: `jaxpi` copy-paste prohibition, provider Terms-of-Service-vs-license distinction (Colab automation-restriction tension named explicitly), on-the-record license check of `jax`/`jaxlib`/`optax`/`equinox`/`diffrax`, tightened unofficial-fork bullet, corrected Rerun's license citation (dual MIT/Apache-2.0), NOTICE-obligation closing note, repo-wide no-LICENSE-file gap tracked as a deferred open item. | Security, License/compliance |
