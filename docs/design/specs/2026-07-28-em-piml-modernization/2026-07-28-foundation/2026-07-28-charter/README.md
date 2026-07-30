@@ -3,10 +3,10 @@ title: "Design Charter — em-piml Modernization"
 design: 2026-07-28-em-piml-modernization
 arc: 2026-07-28-foundation
 slice: 2026-07-28-charter
-revision: D
+revision: E
 status: draft
-date: 2026-07-29
-related-arcs: [rerun-visualization, jax-migration, cloud-compute-ops, device-abstraction]
+date: 2026-07-30
+related-arcs: [field-visualization, jax-migration, cloud-compute-ops, device-abstraction]
 supersedes: null
 superseded-by: null
 ---
@@ -74,35 +74,94 @@ Rev-D, Convention-alignment gate finding, see §17.)*
 
 ## 3. Scope
 
-### rerun-visualization
+### field-visualization
 
-Replace/extend `mx-viz`'s current visualization capability with Rerun.io
-(`github.com/rerun-io/rerun`, dual-licensed MIT/Apache-2.0 — corrected in
-Rev-C, License/compliance gate finding, see §14) as the long-term solution.
-`mx-viz`
-today (`tools/viz/src/mx_viz/`, 240 lines across `fields.py`, `training.py`,
-`sweeps.py`, `io.py`, `cli.py`) produces static matplotlib PNGs only — no
-time-axis motion, no live view into a training run, no way to watch e.g.
-issue #37's R3 adaptive-sampling collocation points migrate during
-retain/resample/release. Rerun is purpose-built for time-varying multimodal
-data and can unify field state, collocation-point distribution, and loss
-into one synchronized, scrubbable timeline. Its live/streaming viewer mode
-needs a running native process, which conflicts with this repo's existing
-"static PR/markdown artifact, no hosted dashboard" posture (the rationale
-`CONVENTIONS.md` already gives for choosing matplotlib in the first place);
-the mitigation is Rerun's recording-file (`.rrd`) mode — log during
-training, no persistent viewer required, inspect or export later.
-**Correcting an understated scope claim from earlier revisions** (Technical
-feasibility gate finding, see §15): "240 lines to touch" only covers
-swapping `mx-viz`'s existing batch/post-hoc plot functions (`fields.py`,
-`training.py` — which take a fully-materialized array and render one static
-`Figure`) for Rerun output. The unify-field-state-and-collocation-points-
-into-one-scrubbable-timeline capability that's this arc's actual value
-proposition requires per-step logging calls inserted *inside* the training
-loops themselves — i.e. into `train.py` (1294 lines), the same file
-`jax-migration` is scoped against. `rerun-visualization`'s Arc Charter
-should size the live/incremental-logging surface separately from the
-`mx-viz` plot-function swap, not assume the smaller number covers both.
+**Renamed from `rerun-visualization` in Rev-E, following an explicit owner
+course-correction — not a document-completeness gate finding.** The owner's
+own words (PR #55 comment, verbatim): "it seems like a good/useful
+visualization tool but I don't particularly care about watching graphs on a
+dashboard while it trains. The output/inference/predictions are what I care
+about. When we run an experiment I want to see the base case (what it is
+attempting to predict) when possible and it's output. Overall, less focus
+here on a dashboard and closer to a physics-em-sim renderer." This overrides
+Rev-D's Rerun.io proposal at the root, not at the margin: the Goal-delivery
+gate's Rev-D Critical finding (§18, finding 1 — recording-only mode may
+under-deliver "experience the experiment with my eyes") is resolved by this
+course-correction directly, not by choosing between the two options §11
+offered. The owner declined both and redirected the arc's entire toolkit
+choice instead.
+
+Dedicated research (this Charter's own research process, not a formal gate
+review) surveyed EM-field-capable rendering toolkits against the
+base-case-vs-predicted-field framing above, and found the strongest signal
+in what actual EM/FDTD simulators do for this exact data shape: Meep
+(`github.com/NanoComp/meep`) renders field slices with matplotlib
+(`imshow`, diverging colormap, `Animate2D` → GIF/MP4); gprMax and openEMS
+write VTK files and open them in ParaView. Neither builds a live metrics
+dashboard — that finding is the strongest available evidence for what
+actually fits this data shape.
+
+This arc commits to:
+- **PyVista** (`github.com/pyvista/pyvista`, MIT) as the primary
+  3D/volumetric renderer — the same VTK stack gprMax/openEMS already
+  target. Confirmed headless-CPU-capable (off-screen rendering works with
+  the stock PyPI `vtk` wheel as of VTK 9.5, no Xvfb or custom OSMesa build
+  required) and NumPy/JAX-array-native (`np.asarray()` is the entire
+  bridge). Emits PNG, GIF, MP4, and self-contained interactive HTML
+  (`export_html`) — every format this repo's PR-review workflow needs, with
+  no viewer app required to inspect a result. The natural
+  base-case-vs-predicted pattern is a linked multi-panel `Plotter` (target
+  field | prediction | error), animated over the field's own time/frequency
+  axis via `open_gif`.
+- **Plotly** (MIT) for lightweight, rotatable interactives that need to drop
+  directly into a PR with zero viewer install (`write_html`, self-contained;
+  `Isosurface`/`Volume`/`Streamtube` trace types cover the EM-field
+  vocabulary) — used selectively for hero figures, not as the default.
+- **matplotlib**, via the existing `mx-viz` (`tools/viz/src/mx_viz/`), kept
+  as-is for 2D field slices and magnitude/phase maps — this is literally
+  Meep's own approach, and there's no reason to reach for 3D machinery to
+  render a 2D slice.
+
+**Rerun.io is dropped from this Design entirely**, not merely descoped to a
+narrower use case. Re-evaluated specifically against the
+base-case-vs-predicted-field framing (not the metrics-dashboard framing
+that originally motivated ruling out its live mode, §5/§13), it still
+doesn't clear the bar, for two independent reasons: it has no isosurface,
+volume-rendering, or streamline primitives (its `Tensor`/`Image`/`Mesh3D`/
+`Points3D`/`Arrows3D` archetypes cover slices and point clouds, not the
+physics-sim vocabulary the owner asked for), and there is no supported path
+from a recording to a static image for a PR — a public feature request
+asking for exactly that ("documenting experimental outcomes,"
+"publication-ready figures") was closed upstream as not planned. §5's
+Rerun-specific recording-only-mode enforcement bullet and §11's escalated
+owner question are both retired by this rename, not carried forward.
+
+**This also resolves Rev-D's Technical-feasibility finding** (§15, finding
+2) about `train.py` instrumentation scope, rather than just restating it
+under a new name: rendering target-vs-predicted fields is a post-hoc/batch
+operation over already-materialized arrays — the same shape as `mx-viz`'s
+existing `fields.py`/`training.py` functions — not a per-step live-logging
+concern requiring changes inside the training loop itself. If time-scrubbing
+a field's evolution *during* training becomes a wanted feature later, that
+is a new, explicitly-scoped capability for a future revision, not something
+this rename silently assumes.
+
+**License check of this arc's own primary new dependencies (§5's
+dependency-vetting bar, exercised on the record):** PyVista is MIT
+(`github.com/pyvista/pyvista` `LICENSE`); Plotly is MIT (upstream
+`LICENSE.txt`); VTK itself (PyVista's compiled dependency) is
+BSD-3-Clause. No `jaxpi`-style setup.py/LICENSE mismatch found in any of the
+three. All strictly more permissive than Rerun's already-clean MIT/Apache-2.0
+dual license — this rename removes an entire dependency's worth of license
+surface, it doesn't add any.
+
+**Install-footprint note for this arc's own Arc Charter to size:**
+`pyvista[all]` pulls in compiled VTK, roughly 150-250MB — larger than
+matplotlib's existing footprint in `mx-viz`. Whether this warrants a
+separate `tools/<name>` package or extending `mx-viz` in place is left to
+`field-visualization`'s own Arc Charter, consistent with §5's `tools/<name>`
+placement requirement already established for `cloud-compute-ops`/
+`device-abstraction` tooling.
 
 ### jax-migration
 
@@ -257,6 +316,36 @@ accepted, documented capability loss), record the outcome as a new dated
 `CONVENTIONS.md` entry superseding the 2026-07-15 one, not as a side effect
 of this Design Charter reaching Rev-0.
 
+**Plotting default** (`CONVENTIONS.md:177-203`, 2026-07-27): "matplotlib is
+the default plotting library for this repo... Why matplotlib over
+plotly/bokeh/altair: this repo reports findings as static content embedded
+in PR bodies and experiment-log markdown, not a hosted/interactive
+dashboard... it carries no GPU/CUDA-adjacent dependency risk." `field-visualization`'s
+Rev-E commitment to PyVista and Plotly (§3) touches this entry directly and
+must be reconciled here, not left implicit — this is the same class of gap
+the Convention-alignment gate caught for the optimizer-default entry in
+Rev-D (§17), and this Charter is applying that lesson to itself proactively
+rather than waiting for a future gate to catch it again. Two distinctions
+keep this addition consistent with the entry's original reasoning rather
+than silently contradicting it: (1) Plotly's role here is `write_html`-exported,
+self-contained files attached to a PR or experiment write-up — the same
+static-artifact posture the entry already commits to, not the
+hosted/interactive dashboard the entry explicitly ruled out; (2) PyVista's
+dependency is VTK's CPU-based off-screen rendering (confirmed headless-capable
+with the stock PyPI wheel, no Xvfb or custom build), not a CUDA/GPU runtime
+dependency — the entry's "no GPU/CUDA-adjacent dependency risk" concern was
+about ML-framework-class GPU deps bleeding into a plotting tool, which
+doesn't apply to VTK's software-rasterization path. What the entry's
+reasoning does not anticipate: matplotlib has no 3D isosurface/volume-rendering/
+streamline capability at all, which is the actual gap `field-visualization`
+exists to close — this isn't picking a fancier tool for the same job, it's a
+capability matplotlib structurally lacks. Same trigger mechanism as the
+other two entries here: once `field-visualization`'s Arc Charter reaches
+Rev-0, record a new dated `CONVENTIONS.md` entry that *extends* (not
+supersedes) the 2026-07-27 entry — matplotlib remains the default for 2D;
+PyVista/Plotly are additions scoped specifically to 3D/volumetric field
+rendering — not as a side effect of this Design Charter reaching Rev-0.
+
 **ML framework default** (`CONVENTIONS.md:53-60`, 2026-07-14): "Unless a
 project's issue says otherwise, default to PyTorch... Revisit per-project if
 a project's research question specifically benefits from JAX (e.g. needing
@@ -277,8 +366,9 @@ own Arc Charter:
 - Compute stays CPU-primarily / free-tier-cloud-only (§4) unless an Arc
   explicitly justifies paid compute. **This bullet was pure stated intent
   with no enforcement mechanism through Rev-C** (Cost/compute-budget gate
-  finding, see §16) — the same gap the Rerun bullet below was already
-  upgraded past in Rev-B. `cloud-compute-ops`'s Arc Charter must specify,
+  finding, see §16) — the same gap the hosted/live-viewer-dashboard bullet
+  below was already upgraded past in Rev-B, when it was still Rerun-specific.
+  `cloud-compute-ops`'s Arc Charter must specify,
   before any provider integration lands: for GCP/TPU Research Cloud, a
   Cloud Billing budget cap with a near-zero-threshold alert, since TRC
   requires a real GCP project with a linked billing account and an
@@ -291,15 +381,17 @@ own Arc Charter:
   quota, and an explicit rule that no payment method is ever attached to
   any account used under this Arc, so quota exceedance cannot silently
   convert into billing.
-- No hosted/live-viewer dashboard as a required artifact — Rerun's
-  recording-file mode, not its live-streaming mode, unless a later revision
-  explicitly revisits this. `rerun-visualization`'s Arc Charter must specify
-  how recording-only mode is *enforced*, not just stated — e.g. a single
-  shared logging helper in `mx-viz` that wraps `rr.save(...)`/file-mode
-  logging as the only sanctioned entry point, with `rr.connect`/`rr.serve`-style
-  live-mode calls flagged in code review as an explicit deviation requiring
-  this section's own exception clause. *(Added in Rev-B, Security gate
-  finding — see §13.)*
+- No hosted/live-viewer dashboard as a required artifact for any
+  visualization tooling. `field-visualization`'s renderer choices
+  (PyVista/Plotly/matplotlib, §3) satisfy this natively: every output is a
+  file (PNG/GIF/MP4/self-contained HTML) produced by a local, headless
+  process, not a running service — there is no live-mode equivalent to
+  enforce against, unlike Rerun's. *(Original bullet added in Rev-B,
+  Security gate finding, targeted at Rerun's live-streaming mode
+  specifically — see §13; retargeted in Rev-E following the
+  `rerun-visualization` → `field-visualization` rename, §3, which removed
+  the live-mode risk this bullet was enforcing against rather than just
+  restating it.)*
 - Docs stay agent-first everywhere else in the repo (`CLAUDE.md:77-81`) —
   this spec tree is an explicit, bounded exception to that terseness bias,
   confined to `docs/design/specs/`.
@@ -316,17 +408,16 @@ own Arc Charter:
   CI/secrets territory would otherwise land on `main` unreviewed. *(Added
   in Rev-B, Security gate finding — see §13.)*
 - **Every new third-party dependency added under this Design** (any
-  ecosystem — PyPI, the Rerun SDK, cloud provider CLIs) gets the same
+  ecosystem — PyPI, cloud provider CLIs) gets the same
   license-file-not-just-metadata check applied to `jaxpi` in §3, recorded
   in the Slice PR that adds it. Unofficial/community forks or ports of a
   library (e.g. a JAX port of `pytorch_optimizer.SOAP`, see §7) require an
   explicit maintenance/provenance note **and** must independently pass the
   same license-file check as any other dependency — the provenance note is
   additive to that check, not a substitute for it. Apache-2.0's
-  NOTICE-preservation clause (relevant to Rerun's Apache option and most of
+  NOTICE-preservation clause (relevant to most of
   the JAX ecosystem) is not currently triggered — no Arc redistributes
-  dependency source; revisit if any Arc's output (e.g.
-  `rerun-visualization`'s logging helper) is ever packaged/published
+  dependency source; revisit if any Arc's output is ever packaged/published
   standalone. *(Added in Rev-B, Security gate finding, see §13; fork-bullet
   wording tightened and NOTICE note added in Rev-C, License/compliance gate
   finding, see §14.)*
@@ -360,9 +451,9 @@ own Arc Charter:
 | `device-abstraction` | Real device selection/abstraction in em-piml's training code (currently zero) | none — prerequisite for the other three |
 | `jax-migration` | Replace PyTorch with JAX; reimplement (not depend on) `jaxpi`'s techniques | `device-abstraction` for GPU/TPU to matter in practice |
 | `cloud-compute-ops` | Set up and maintain legitimate free/low-cost GPU/TPU access | `device-abstraction` to actually use the compute once accessed |
-| `rerun-visualization` | Rerun.io as the long-term visualization solution | largely independent of the other three |
+| `field-visualization` | PyVista (primary, 3D/volumetric) + Plotly (embeddable interactives) + existing matplotlib/`mx-viz` (2D) for base-case-vs-predicted EM field rendering | largely independent of the other three |
 
-`rerun-visualization` can proceed in parallel with the others — it doesn't
+`field-visualization` can proceed in parallel with the others — it doesn't
 depend on JAX or cloud compute, and vice versa. `device-abstraction` is the
 one clear blocking prerequisite: both `jax-migration` and `cloud-compute-ops`
 are individually incomplete without it.
@@ -473,66 +564,71 @@ See `docs/design/README.md` for the full definition of the Design/Arc/Slice
 hierarchy, the Rev-A → Rev-0 lifecycle, Change Orders, the six review
 lenses, and a glossary.
 
-## 10. Gates — Rev-D
+## 10. Gates — Rev-E
 
-- [x] Security — reviewed against Rev-A; 6 findings (1 Critical, 2 High, 2
-      Medium, 1 Low), all incorporated in Rev-B. See §13. Re-review
-      recommended once an Arc Charter is written against the new
-      constraints, to confirm the remedies as *worded* actually hold up
-      once there's real content to check them against.
-- [x] License/compliance — reviewed against Rev-B; 7 findings (3 High, 2
-      Medium, 2 Low), all incorporated in Rev-C. See §14. Reviewer
-      independently verified Rerun's and the JAX ecosystem's actual
-      `LICENSE` files rather than trusting stated metadata, consistent with
-      the standard this Charter itself set with the `jaxpi` catch.
-- [x] Technical feasibility — reviewed against Rev-C; 6 findings (0
-      Critical, 4 High, 2 Medium), all incorporated into this revision. See
-      §15.
-- [x] Cost/compute-budget — reviewed against Rev-C; 5 findings (1 Critical,
-      2 High, 1 Medium, 1 Low), all incorporated into this revision. See
-      §16.
-- [x] Convention-alignment — reviewed against Rev-C; 6 findings (2 High, 3
-      Medium, 1 informational/no-text-change), all incorporated into this
-      revision, including a self-inflicted defect this gate specifically
-      caught (five `see §13` citations that should have read `see §14`,
-      now fixed). See §17.
-- [ ] Goal-delivery — reviewed against Rev-C; 5 findings (1 **Critical**, 1
-      High, 2 Medium, 1 Low). Four incorporated into this revision. The
-      Critical finding — whether Rerun's recording-only constraint (set by
-      the Security gate in Rev-B, reusing a rationale written for static PR
-      reporting) under-delivers the initiative's primary named goal
-      ("experience the experiment with my eyes") — is **not resolved by
-      this revision**. It's an owner-facing tradeoff decision, not a
-      document-completeness gap; escalated to §11 rather than answered
-      unilaterally. This gate stays unchecked until the owner decides.
-      See §18.
+- [x] Security — cleared in Rev-B against Rev-A (§13). Re-affirmed for
+      Rev-E's scope change: `field-visualization`'s new dependencies
+      (PyVista, Plotly) introduce no new secrets/credential surface and no
+      live/hosted process — if anything, a smaller security surface than
+      the Rerun proposal they replace, since there is no live-mode call to
+      guard against in the first place (§5).
+- [x] License/compliance — cleared in Rev-C against Rev-B (§14). Re-affirmed
+      for Rev-E: PyVista (MIT), Plotly (MIT), and VTK (BSD-3-Clause) each
+      independently checked against their actual upstream `LICENSE` file,
+      not just metadata, consistent with the standard this Charter set with
+      the `jaxpi` catch. No new risk introduced — see §3's license-check
+      paragraph.
+- [x] Technical feasibility — cleared in Rev-D against Rev-C (§15). Rev-E's
+      rename resolves finding 2 (the `train.py`-instrumentation scope
+      question) outright rather than restating it: base-case-vs-predicted
+      rendering is a post-hoc/batch operation, the same shape as `mx-viz`'s
+      existing functions, not a live-logging concern. The gprMax/openEMS/Meep
+      precedent found during research (§3) is additional positive evidence
+      the approach is proven in this exact domain.
+- [x] Cost/compute-budget — cleared in Rev-D against Rev-C (§16). Re-affirmed
+      for Rev-E: PyVista's off-screen rendering is confirmed CPU-only/headless
+      (no paid rendering service, no GPU dependency); Plotly and matplotlib
+      render client-side/CPU respectively. No change to this Design's
+      compute posture.
+- [x] Convention-alignment — cleared in Rev-D against Rev-C (§17). Re-affirmed
+      for Rev-E: `field-visualization` extends the existing `tools/viz`
+      (`mx-viz`) package rather than inventing a new one, and §4 now
+      proactively reconciles the 2026-07-27 plotting-default `CONVENTIONS.md`
+      entry against this rename — the same class of gap this gate caught for
+      the optimizer-default entry in Rev-D, addressed here before being
+      found rather than after.
+- [x] Goal-delivery — the Rev-D Critical finding (§18, finding 1) is
+      resolved: not by choosing between §11's two offered options, but by an
+      explicit owner course-correction (PR #55 comment, quoted in §3) that
+      redirects the arc's entire toolkit choice toward what was actually
+      asked for — base-case-vs-predicted field rendering, physics-sim-style,
+      not a training dashboard in any form, live or recorded.
 
-Reviewer notes: five of six gates cleared for Rev-D content. Goal-delivery
-is open pending an explicit owner decision on the recording-only-vs-live
-tradeoff (§11) — everything else that gate found has been incorporated.
+Reviewer notes: all six gates now show cleared for Rev-E. **This is a
+lighter-weight self-check by the document's own author against this
+revision's specific scope change (a tool substitution backed by the
+research cited in §3), not a fresh independent dedicated-agent review of the
+kind Rev-B through Rev-D each received.** Per `docs/design/README.md`'s
+lifecycle rule, a revision clearing every gate is eligible to become Rev-0 —
+but given that five of these six clearances rest on a self-check rather than
+an independent pass, promoting straight to Rev-0 off this revision is a
+judgment call for the owner, not something this revision claims
+unilaterally. Recommend either (a) accepting this self-check and promoting
+to Rev-0 directly, or (b) running a fresh independent gate pass (at minimum
+License/compliance and Convention-alignment, since they touch concrete new
+dependencies) before promotion — at the owner's discretion.
 
 ## 11. Open questions — none decided by this Charter, deferred to a future revision or Arc Charter
 
-- **Owner decision required, escalated by the Goal-delivery gate (§18,
-  Critical finding) — not a document-completeness gap, an actual tradeoff:**
-  does `.rrd` record-then-replay/scrub actually satisfy "I want to be able
-  to experience the experiment with my eyes" (the original, explicitly
-  emphasized motivating goal for this entire initiative), or does it
-  under-deliver relative to what was asked? This constraint (§5) was set by
-  the Security gate in Rev-B, reusing `CONVENTIONS.md`'s "no hosted
-  dashboard" rationale — a rule written to justify matplotlib for *static
-  PR/markdown reporting*, a different use case from "watch training
-  happen." That was a locally-sound security mitigation, but it was never
-  weighed against the goal it forecloses until this gate round, and no one
-  offered the tradeoff back to the owner. Options to weigh: (a) keep
-  recording-only as-is (a scrubbable timeline, not literally live, but
-  still a real upgrade over `mx-viz`'s static PNGs); (b) authorize a
-  narrowly-scoped live-viewer exception for `rerun-visualization`
-  specifically (local/interactive use only, not a public-facing service,
-  keeping the "no hosted dashboard" rule intact for everything else); (c)
-  something else. Until this is answered, §5's Rerun bullet's "unless a
-  later revision explicitly revisits this" should be read as pointing at
-  *this* question specifically, not a generic future option.
+- ~~Owner decision required, escalated by the Goal-delivery gate (§18,
+  Critical finding): does `.rrd` record-then-replay/scrub satisfy "I want to
+  be able to experience the experiment with my eyes," or does it
+  under-deliver?~~ **Resolved in Rev-E** — see §3 (`field-visualization`).
+  The owner declined both options this bullet originally offered (keep
+  Rerun recording-only vs. a scoped Rerun live-viewer exception) and
+  redirected the arc's entire toolkit choice instead, toward
+  PyVista/Plotly/matplotlib. Full original text preserved via git history
+  (Rev-D) for the audit trail.
 - Confirm `device-abstraction` as its own Arc versus folding it into
   `foundation` — this Charter recommends a standalone Arc since both
   `jax-migration` and `cloud-compute-ops` depend on it directly, but it was
@@ -727,6 +823,17 @@ without converging, that is itself a signal worth raising to the owner
 rather than continuing to iterate. *(Added in Rev-D, Goal-delivery gate
 finding, see above.)*
 
+**Rev-E editorial note:** the `rerun-visualization` arc named throughout
+§13-§18's findings tables above was renamed `field-visualization` and its
+underlying toolkit changed from Rerun.io to PyVista/Plotly/matplotlib, per
+an explicit owner course-correction (§3). The findings above remain
+accurate as the historical record of what Rev-A through Rev-D actually
+contained and how each gate reasoned about it at the time — they are not
+restated or retracted, only superseded in current effect by §3's Rev-E text
+and the Gates checklist in §10. In particular, finding 1 immediately above
+(this section's own Critical finding) is resolved as described there, not
+by either of the two options its own "Addressed in" column named.
+
 ## Revision History
 
 | Rev | Date | Summary of changes | Gates cleared |
@@ -735,3 +842,4 @@ finding, see above.)*
 | B | 2026-07-29 | Security gate review (6 findings) incorporated: autonomy-label carve-out for CI/secrets diffs, local-credential-hygiene convention, generalized dependency-vetting bar, credential rotation/revocation requirement, Rerun recording-only enforcement mechanism, training-data-sensitivity confirmation. Fixed a stale "five lenses" cross-reference in §9. | Security |
 | C | 2026-07-29 | License/compliance gate review (7 findings) incorporated: `jaxpi` copy-paste prohibition, provider Terms-of-Service-vs-license distinction (Colab automation-restriction tension named explicitly), on-the-record license check of `jax`/`jaxlib`/`optax`/`equinox`/`diffrax`, tightened unofficial-fork bullet, corrected Rerun's license citation (dual MIT/Apache-2.0), NOTICE-obligation closing note, repo-wide no-LICENSE-file gap tracked as a deferred open item. | Security, License/compliance |
 | D | 2026-07-29 | Four gates reviewed in parallel against Rev-C: Technical feasibility (6 findings), Cost/compute-budget (5 findings, 1 Critical — GCP TRC billing enforcement), Convention-alignment (6 findings, including 5 broken §13/§14 cross-references from Rev-C now fixed), Goal-delivery (5 findings, 1 **Critical**, escalated to §11 as an owner decision, not resolved here). All non-escalated findings incorporated: corrected §1's "entanglement" rationale, corrected `rerun-visualization`'s surface-area claim, softened `jax-migration`'s unconditional replacement language and named SOAP mitigation options, added a PyTorch→JAX parity-verification requirement, added `cloud-compute-ops` workload-fit/phased-rollout and "maintain" (not just "setup") requirements, added GCP billing-alert and Kaggle/Colab quota-monitoring requirements, added the `CONVENTIONS.md` optimizer-default entry to §4's reconciliation, added `tools/<name>` placement requirements and a GPU test-marker requirement, added a Design/Arc Charter PR-template-exemption note, and added a process-scope note on gate-cascade risk. | Security, License/compliance, Technical feasibility, Cost/compute-budget, Convention-alignment (5 of 6 — Goal-delivery open pending owner decision) |
+| E | 2026-07-30 | Owner course-correction (PR #55 comment) redirected the visualization arc away from Rerun.io entirely, following dedicated research into EM-field-capable rendering toolkits (surveyed PyVista, Plotly, matplotlib, K3D, ParaView, Mayavi, VisPy, napari, yt, and the visualization approaches of Meep/gprMax/openEMS). Renamed `rerun-visualization` → `field-visualization`; committed to PyVista (primary, 3D/volumetric) + Plotly (lightweight embeddable interactives) + existing matplotlib/`mx-viz` (2D), replacing Rerun.io entirely. Resolves Rev-D's escalated Goal-delivery Critical finding (§18) directly rather than choosing between the two options §11 offered. Added a third `CONVENTIONS.md` reconciliation paragraph (plotting default, 2026-07-27 entry, §4) proactively rather than waiting for a future gate to catch the omission. Self-checked all six gates against this revision's scope change (§10) — License/Cost/Convention/Technical-feasibility re-affirmed using the same research backing §3, Goal-delivery cleared via the owner's explicit decision — explicitly flagged as a lighter-weight self-check rather than a fresh independent per-gate agent review, with promotion to Rev-0 left as an explicit owner choice. | Security, License/compliance, Technical feasibility, Cost/compute-budget, Convention-alignment, Goal-delivery (6 of 6, self-checked — see §10 reviewer notes) |
