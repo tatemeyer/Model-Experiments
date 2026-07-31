@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from pytorch_optimizer import SOAP
 
+from em_piml.device import resolve_device
 from em_piml.dielectric import PERIOD as DIELECTRIC_PERIOD
 from em_piml.dielectric import analytical_field_dielectric, pde_residual_dielectric
 from em_piml.model import (
@@ -75,6 +76,7 @@ def _sample_points(
     generator: torch.Generator | None = None,
     t_max: float = PERIOD,
     dtype: torch.dtype = torch.float32,
+    device: torch.device = torch.device("cpu"),
 ) -> tuple[torch.Tensor, ...]:
     # generator=None draws from the global RNG (whatever torch.manual_seed set up before this
     # call) - the original behavior, kept as the default so existing callers/tests are
@@ -85,14 +87,16 @@ def _sample_points(
     # behavior bit-for-bit (torch.rand()'s implicit default dtype is float32 too); issue #38's
     # FP64 variant passes torch.float64 so collocation/boundary/initial points match the model's
     # own (also-cast-to-float64) parameter dtype -- mismatched dtypes between input and model
-    # weights would otherwise error inside the first Linear layer.
-    x_c = torch.rand(n_collocation, 1, generator=generator, dtype=dtype) * L
-    t_c = torch.rand(n_collocation, 1, generator=generator, dtype=dtype) * t_max
-    t_b = torch.rand(n_boundary, 1, generator=generator, dtype=dtype) * t_max
-    x_b0 = torch.zeros(n_boundary, 1, dtype=dtype)
-    x_bl = torch.full((n_boundary, 1), L, dtype=dtype)
-    x_i = torch.rand(n_initial, 1, generator=generator, dtype=dtype) * L
-    t_i = torch.zeros(n_initial, 1, dtype=dtype)
+    # weights would otherwise error inside the first Linear layer. device=cpu (default) preserves
+    # existing behavior bit-for-bit (device-abstraction Arc, Slice 2, issue #59); callers pass the
+    # already-resolved device down from their own device= argument.
+    x_c = torch.rand(n_collocation, 1, generator=generator, dtype=dtype, device=device) * L
+    t_c = torch.rand(n_collocation, 1, generator=generator, dtype=dtype, device=device) * t_max
+    t_b = torch.rand(n_boundary, 1, generator=generator, dtype=dtype, device=device) * t_max
+    x_b0 = torch.zeros(n_boundary, 1, dtype=dtype, device=device)
+    x_bl = torch.full((n_boundary, 1), L, dtype=dtype, device=device)
+    x_i = torch.rand(n_initial, 1, generator=generator, dtype=dtype, device=device) * L
+    t_i = torch.zeros(n_initial, 1, dtype=dtype, device=device)
     return x_c, t_c, x_b0, x_bl, t_b, x_i, t_i
 
 
@@ -106,6 +110,7 @@ def _train_pinn_adam(
     field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
     t_max: float = PERIOD,
     history: list[float] | None = None,
+    device: torch.device = torch.device("cpu"),
 ) -> torch.nn.Module:
     # history=None (default) preserves the original behavior exactly, zero-cost -- same opt-in
     # idiom as _sample_points' generator=None. Pass a list to record loss.item() every step (e.g.
@@ -114,7 +119,7 @@ def _train_pinn_adam(
 
     for _ in range(steps):
         optimizer.zero_grad()
-        points = _sample_points(n_collocation, n_boundary, n_initial, t_max=t_max)
+        points = _sample_points(n_collocation, n_boundary, n_initial, t_max=t_max, device=device)
         loss = _pinn_loss(model, *points, field_fn=field_fn)
         loss.backward()
         optimizer.step()
@@ -134,11 +139,12 @@ def _train_pinn_lbfgs(
     points_generator: torch.Generator | None = None,
     field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
     dtype: torch.dtype = torch.float32,
+    device: torch.device = torch.device("cpu"),
 ) -> torch.nn.Module:
     # L-BFGS assumes a fixed (deterministic) objective across its internal line-search
     # evaluations, so — unlike Adam — collocation points are sampled once, not per step.
     points = _sample_points(
-        n_collocation, n_boundary, n_initial, generator=points_generator, dtype=dtype
+        n_collocation, n_boundary, n_initial, generator=points_generator, dtype=dtype, device=device
     )
     optimizer = torch.optim.LBFGS(
         model.parameters(), max_iter=max_iter, history_size=50, line_search_fn="strong_wolfe"
@@ -164,6 +170,7 @@ def _train_pinn_soap(
     n_initial: int,
     lr: float,
     field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
+    device: torch.device = torch.device("cpu"),
 ) -> torch.nn.Module:
     # Same fixed (not resampled) point set as _train_pinn_lbfgs, so swapping the optimizer is
     # the only variable in the L-BFGS vs. SOAP comparison. SOAP doesn't need this determinism
@@ -178,7 +185,7 @@ def _train_pinn_soap(
     prior_threads = torch.get_num_threads()
     torch.set_num_threads(1)
     try:
-        points = _sample_points(n_collocation, n_boundary, n_initial)
+        points = _sample_points(n_collocation, n_boundary, n_initial, device=device)
         optimizer = SOAP(model.parameters(), lr=lr)
         for _ in range(steps):
             optimizer.zero_grad()
@@ -269,6 +276,7 @@ def _train_pseudo_sequence_pinn_adam(
     n_initial: int,
     lr: float,
     t_max: float = PERIOD,
+    device: torch.device = torch.device("cpu"),
 ) -> PseudoSequenceCavityPINN:
     # Single-threaded for the same reason as _train_pinn_soap: this workload is dominated by many
     # small ops (_sequence_derivative does k backward passes per derivative, and the residual loss
@@ -284,7 +292,9 @@ def _train_pseudo_sequence_pinn_adam(
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
         for _ in range(steps):
             optimizer.zero_grad()
-            points = _sample_points(n_collocation, n_boundary, n_initial, t_max=t_max)
+            points = _sample_points(
+                n_collocation, n_boundary, n_initial, t_max=t_max, device=device
+            )
             loss = _pseudo_sequence_pinn_loss(model, *points)
             loss.backward()
             optimizer.step()
@@ -301,10 +311,12 @@ def train_cavity_baseline(
     n_boundary: int = 64,
     n_initial: int = 64,
     lr: float = 3e-3,
+    device: torch.device | str | None = None,
 ) -> CavityPINN:
+    device = resolve_device(device)
     torch.manual_seed(seed)
-    model = CavityPINN(hidden=32, num_layers=3)
-    return _train_pinn_adam(model, steps, n_collocation, n_boundary, n_initial, lr)
+    model = CavityPINN(hidden=32, num_layers=3).to(device)
+    return _train_pinn_adam(model, steps, n_collocation, n_boundary, n_initial, lr, device=device)
 
 
 def train_fourier_cavity_baseline(
@@ -315,10 +327,12 @@ def train_fourier_cavity_baseline(
     n_initial: int = 64,
     lr: float = 3e-3,
     num_bands: int = 2,
+    device: torch.device | str | None = None,
 ) -> FourierCavityPINN:
+    device = resolve_device(device)
     torch.manual_seed(seed)
-    model = FourierCavityPINN(hidden=32, num_layers=3, num_bands=num_bands)
-    return _train_pinn_adam(model, steps, n_collocation, n_boundary, n_initial, lr)
+    model = FourierCavityPINN(hidden=32, num_layers=3, num_bands=num_bands).to(device)
+    return _train_pinn_adam(model, steps, n_collocation, n_boundary, n_initial, lr, device=device)
 
 
 def train_fourier_cavity_lbfgs(
@@ -332,6 +346,7 @@ def train_fourier_cavity_lbfgs(
     points_seed: int | None = None,
     hidden: int = 64,
     dtype: torch.dtype = torch.float32,
+    device: torch.device | str | None = None,
 ) -> FourierCavityPINN:
     # points_seed=None (default): points are drawn from the same global RNG stream as model
     # init, exactly as before (issue #8's behavior, unaffected). Passing an explicit
@@ -348,13 +363,16 @@ def train_fourier_cavity_lbfgs(
     # torch.float64 (see train_fourier_cavity_lbfgs_fp64 below) to test "FP64 is All You Need"
     # (arXiv:2505.10949)'s claim that L-BFGS's convergence test firing early under FP32 explains
     # PINN failure modes previously attributed to genuine local optima.
+    device = resolve_device(device)
     torch.manual_seed(seed)
     model = FourierCavityPINN(hidden=hidden, num_layers=3, num_bands=num_bands)
-    if dtype != torch.float32:
-        model = model.to(dtype)
+    model = model.to(device=device, dtype=dtype)
     points_generator = None
     if points_seed is not None:
-        points_generator = torch.Generator().manual_seed(points_seed)
+        # torch.Generator is device-bound (device-abstraction Arc Charter Sec5): a CUDA generator
+        # draws a different sequence than a CPU one for the same seed, so points_seed's
+        # reproducibility guarantee holds within a device, not across devices.
+        points_generator = torch.Generator(device=device).manual_seed(points_seed)
     return _train_pinn_lbfgs(
         model,
         outer_steps,
@@ -364,6 +382,7 @@ def train_fourier_cavity_lbfgs(
         n_initial,
         points_generator=points_generator,
         dtype=dtype,
+        device=device,
     )
 
 
@@ -377,6 +396,7 @@ def train_fourier_cavity_lbfgs_fp64(
     n_initial: int = 400,
     points_seed: int | None = None,
     hidden: int = 64,
+    device: torch.device | str | None = None,
 ) -> FourierCavityPINN:
     """FP64 variant of train_fourier_cavity_lbfgs (issue #38) -- identical in every other respect
     (same architecture/density/optimizer/step budget for a given `hidden`), only torch.float64
@@ -395,6 +415,7 @@ def train_fourier_cavity_lbfgs_fp64(
         points_seed=points_seed,
         hidden=hidden,
         dtype=torch.float64,
+        device=device,
     )
 
 
@@ -406,10 +427,12 @@ def train_fourier_cavity_soap(
     n_boundary: int = 400,
     n_initial: int = 400,
     lr: float = 3e-3,
+    device: torch.device | str | None = None,
 ) -> FourierCavityPINN:
+    device = resolve_device(device)
     torch.manual_seed(seed)
-    model = FourierCavityPINN(hidden=32, num_layers=3, num_bands=num_bands)
-    return _train_pinn_soap(model, steps, n_collocation, n_boundary, n_initial, lr)
+    model = FourierCavityPINN(hidden=32, num_layers=3, num_bands=num_bands).to(device)
+    return _train_pinn_soap(model, steps, n_collocation, n_boundary, n_initial, lr, device=device)
 
 
 def train_fourier_cavity_lbfgs_two_mode(
@@ -421,17 +444,19 @@ def train_fourier_cavity_lbfgs_two_mode(
     n_boundary: int = 400,
     n_initial: int = 400,
     points_seed: int | None = None,
+    device: torch.device | str | None = None,
 ) -> FourierCavityPINN:
     # issue #25: same shipped recipe as train_fourier_cavity_lbfgs (issue #10's capacity fix,
     # issue #8's density fix) -- only field_fn differs, same pattern as train_*_two_mode above.
     # Adam destabilizes at num_bands>=2 on this target the same way issue #4 found on the
     # single-mode baseline (see CLAUDE.md), so this and the SOAP variant below are what let
     # num_bands be tested at all past 2 without confounding "can't train" with "can't represent."
+    device = resolve_device(device)
     torch.manual_seed(seed)
-    model = FourierCavityPINN(hidden=64, num_layers=3, num_bands=num_bands)
+    model = FourierCavityPINN(hidden=64, num_layers=3, num_bands=num_bands).to(device)
     points_generator = None
     if points_seed is not None:
-        points_generator = torch.Generator().manual_seed(points_seed)
+        points_generator = torch.Generator(device=device).manual_seed(points_seed)
     return _train_pinn_lbfgs(
         model,
         outer_steps,
@@ -441,6 +466,7 @@ def train_fourier_cavity_lbfgs_two_mode(
         n_initial,
         points_generator=points_generator,
         field_fn=analytical_field_two_mode,
+        device=device,
     )
 
 
@@ -452,11 +478,20 @@ def train_fourier_cavity_soap_two_mode(
     n_boundary: int = 400,
     n_initial: int = 400,
     lr: float = 3e-3,
+    device: torch.device | str | None = None,
 ) -> FourierCavityPINN:
+    device = resolve_device(device)
     torch.manual_seed(seed)
-    model = FourierCavityPINN(hidden=32, num_layers=3, num_bands=num_bands)
+    model = FourierCavityPINN(hidden=32, num_layers=3, num_bands=num_bands).to(device)
     return _train_pinn_soap(
-        model, steps, n_collocation, n_boundary, n_initial, lr, field_fn=analytical_field_two_mode
+        model,
+        steps,
+        n_collocation,
+        n_boundary,
+        n_initial,
+        lr,
+        field_fn=analytical_field_two_mode,
+        device=device,
     )
 
 
@@ -469,10 +504,14 @@ def train_pseudo_sequence_cavity(
     lr: float = 3e-3,
     k: int = 3,
     dt: float = 1e-3,
+    device: torch.device | str | None = None,
 ) -> PseudoSequenceCavityPINN:
+    device = resolve_device(device)
     torch.manual_seed(seed)
-    model = PseudoSequenceCavityPINN(k=k, dt=dt)
-    return _train_pseudo_sequence_pinn_adam(model, steps, n_collocation, n_boundary, n_initial, lr)
+    model = PseudoSequenceCavityPINN(k=k, dt=dt).to(device)
+    return _train_pseudo_sequence_pinn_adam(
+        model, steps, n_collocation, n_boundary, n_initial, lr, device=device
+    )
 
 
 def train_pseudo_sequence_cavity_long_horizon(
@@ -485,16 +524,25 @@ def train_pseudo_sequence_cavity_long_horizon(
     k: int = 3,
     dt: float = 1e-3,
     horizon_periods: float = 5.0,
+    device: torch.device | str | None = None,
 ) -> PseudoSequenceCavityPINN:
     # issue #30: same shipped config as train_pseudo_sequence_cavity (issue #20) -- only the
     # training/eval time domain changes (t_max = horizon_periods * PERIOD instead of one PERIOD),
     # mirroring train_cavity_long_horizon's (issue #23) t_max-only variable, so this is a direct
     # comparison against that issue's plain-baseline (~0.96) and causal-reweighted (~0.96) numbers
     # on the exact same long-horizon target.
+    device = resolve_device(device)
     torch.manual_seed(seed)
-    model = PseudoSequenceCavityPINN(k=k, dt=dt)
+    model = PseudoSequenceCavityPINN(k=k, dt=dt).to(device)
     return _train_pseudo_sequence_pinn_adam(
-        model, steps, n_collocation, n_boundary, n_initial, lr, t_max=horizon_periods * PERIOD
+        model,
+        steps,
+        n_collocation,
+        n_boundary,
+        n_initial,
+        lr,
+        t_max=horizon_periods * PERIOD,
+        device=device,
     )
 
 
@@ -505,13 +553,22 @@ def train_cavity_two_mode(
     n_boundary: int = 64,
     n_initial: int = 64,
     lr: float = 3e-3,
+    device: torch.device | str | None = None,
 ) -> CavityPINN:
     # Same shipped defaults as train_cavity_baseline (issue #22's constraint: only the target
     # field's mode content changes, everything else held fixed) -- only field_fn differs.
+    device = resolve_device(device)
     torch.manual_seed(seed)
-    model = CavityPINN(hidden=32, num_layers=3)
+    model = CavityPINN(hidden=32, num_layers=3).to(device)
     return _train_pinn_adam(
-        model, steps, n_collocation, n_boundary, n_initial, lr, field_fn=analytical_field_two_mode
+        model,
+        steps,
+        n_collocation,
+        n_boundary,
+        n_initial,
+        lr,
+        field_fn=analytical_field_two_mode,
+        device=device,
     )
 
 
@@ -523,14 +580,23 @@ def train_fourier_cavity_two_mode(
     n_initial: int = 64,
     lr: float = 3e-3,
     num_bands: int = 2,
+    device: torch.device | str | None = None,
 ) -> FourierCavityPINN:
     # Same shipped defaults as train_fourier_cavity_baseline, including num_bands=2 -- see
     # projects/em-piml/CLAUDE.md issue #22 for why that default's frequency coverage is itself
     # part of what's being tested here, not something to silently retune.
+    device = resolve_device(device)
     torch.manual_seed(seed)
-    model = FourierCavityPINN(hidden=32, num_layers=3, num_bands=num_bands)
+    model = FourierCavityPINN(hidden=32, num_layers=3, num_bands=num_bands).to(device)
     return _train_pinn_adam(
-        model, steps, n_collocation, n_boundary, n_initial, lr, field_fn=analytical_field_two_mode
+        model,
+        steps,
+        n_collocation,
+        n_boundary,
+        n_initial,
+        lr,
+        field_fn=analytical_field_two_mode,
+        device=device,
     )
 
 
@@ -543,13 +609,15 @@ def train_cavity_long_horizon(
     lr: float = 3e-3,
     horizon_periods: float = 5.0,
     history: list[float] | None = None,
+    device: torch.device | str | None = None,
 ) -> CavityPINN:
     # issue #23: same shipped defaults as train_cavity_baseline -- only the training/eval time
     # domain changes (t_max = horizon_periods * PERIOD instead of one PERIOD), uniform loss
     # weighting throughout (the causal variant below is the only variable-controlled comparison).
     # history is optional loss-curve recording (see _train_pinn_adam), for mx_viz.
+    device = resolve_device(device)
     torch.manual_seed(seed)
-    model = CavityPINN(hidden=32, num_layers=3)
+    model = CavityPINN(hidden=32, num_layers=3).to(device)
     return _train_pinn_adam(
         model,
         steps,
@@ -559,6 +627,7 @@ def train_cavity_long_horizon(
         lr,
         t_max=horizon_periods * PERIOD,
         history=history,
+        device=device,
     )
 
 
@@ -568,6 +637,7 @@ def _sample_points_causal(
     t_max: float,
     n_boundary: int,
     n_initial: int,
+    device: torch.device = torch.device("cpu"),
 ) -> tuple[torch.Tensor, ...]:
     # Collocation points are stratified into n_chunks equal-width, temporally ordered bins (not
     # drawn uniformly at random over the whole domain like _sample_points) so that every training
@@ -576,15 +646,17 @@ def _sample_points_causal(
     # (all of chunk 0, then all of chunk 1, ...) so a single pde_residual call's output can be
     # reshaped into (n_chunks, n_per_chunk) without a second autograd pass per chunk.
     chunk_width = t_max / n_chunks
-    chunk_offsets = torch.arange(n_chunks).repeat_interleave(n_per_chunk).unsqueeze(1).float()
+    chunk_offsets = (
+        torch.arange(n_chunks, device=device).repeat_interleave(n_per_chunk).unsqueeze(1).float()
+    )
     n_total = n_chunks * n_per_chunk
-    x_c = torch.rand(n_total, 1) * L
-    t_c = chunk_offsets * chunk_width + torch.rand(n_total, 1) * chunk_width
-    t_b = torch.rand(n_boundary, 1) * t_max
-    x_b0 = torch.zeros(n_boundary, 1)
-    x_bl = torch.full((n_boundary, 1), L)
-    x_i = torch.rand(n_initial, 1) * L
-    t_i = torch.zeros(n_initial, 1)
+    x_c = torch.rand(n_total, 1, device=device) * L
+    t_c = chunk_offsets * chunk_width + torch.rand(n_total, 1, device=device) * chunk_width
+    t_b = torch.rand(n_boundary, 1, device=device) * t_max
+    x_b0 = torch.zeros(n_boundary, 1, device=device)
+    x_bl = torch.full((n_boundary, 1), L, device=device)
+    x_i = torch.rand(n_initial, 1, device=device) * L
+    t_i = torch.zeros(n_initial, 1, device=device)
     return x_c, t_c, x_b0, x_bl, t_b, x_i, t_i
 
 
@@ -642,12 +714,15 @@ def _train_pinn_adam_causal(
     lr: float,
     epsilon: float,
     field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
+    device: torch.device = torch.device("cpu"),
 ) -> torch.nn.Module:
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     for _ in range(steps):
         optimizer.zero_grad()
-        points = _sample_points_causal(n_per_chunk, n_chunks, t_max, n_boundary, n_initial)
+        points = _sample_points_causal(
+            n_per_chunk, n_chunks, t_max, n_boundary, n_initial, device=device
+        )
         loss = _causal_pinn_loss(
             model, *points, n_chunks=n_chunks, epsilon=epsilon, field_fn=field_fn
         )
@@ -667,15 +742,26 @@ def train_cavity_causal_long_horizon(
     lr: float = 3e-3,
     horizon_periods: float = 5.0,
     epsilon: float = 1.0,
+    device: torch.device | str | None = None,
 ) -> CavityPINN:
     # n_per_chunk * n_chunks = 200 == train_cavity_long_horizon's n_collocation default, so the
     # two functions compare the same total collocation-point budget over the same extended
     # domain -- causal chunking/weighting is the only variable, per issue #23's constraint.
+    device = resolve_device(device)
     torch.manual_seed(seed)
-    model = CavityPINN(hidden=32, num_layers=3)
+    model = CavityPINN(hidden=32, num_layers=3).to(device)
     t_max = horizon_periods * PERIOD
     return _train_pinn_adam_causal(
-        model, steps, n_per_chunk, n_chunks, t_max, n_boundary, n_initial, lr, epsilon
+        model,
+        steps,
+        n_per_chunk,
+        n_chunks,
+        t_max,
+        n_boundary,
+        n_initial,
+        lr,
+        epsilon,
+        device=device,
     )
 
 
@@ -688,6 +774,7 @@ def train_cavity_curriculum_long_horizon(
     lr: float = 3e-3,
     horizon_periods: float = 5.0,
     n_stages: int = 5,
+    device: torch.device | str | None = None,
 ) -> CavityPINN:
     # issue #32: same total step budget, point counts, lr, and architecture as
     # train_cavity_long_horizon/train_cavity_causal_long_horizon (issue #23) -- the only variable
@@ -701,13 +788,21 @@ def train_cavity_curriculum_long_horizon(
     # stage, continuing from the previous stage's weights) -- a fresh Adam optimizer each stage,
     # not persisted across the t_max change, since Adam's per-parameter moment estimates were
     # tuned against a different (narrower) point distribution in the prior stage.
+    device = resolve_device(device)
     torch.manual_seed(seed)
-    model = CavityPINN(hidden=32, num_layers=3)
+    model = CavityPINN(hidden=32, num_layers=3).to(device)
     steps_per_stage = steps // n_stages
     for stage in range(1, n_stages + 1):
         stage_t_max = (stage / n_stages) * horizon_periods * PERIOD
         model = _train_pinn_adam(
-            model, steps_per_stage, n_collocation, n_boundary, n_initial, lr, t_max=stage_t_max
+            model,
+            steps_per_stage,
+            n_collocation,
+            n_boundary,
+            n_initial,
+            lr,
+            t_max=stage_t_max,
+            device=device,
         )
     return model
 
@@ -718,7 +813,7 @@ def _grad_norm(loss: torch.Tensor, params: list[torch.nn.Parameter]) -> torch.Te
     # MLP -- in practice every loss term here touches every parameter (the whole network sits
     # between input and output), but this is defensive rather than assumed.
     grads = torch.autograd.grad(loss, params, retain_graph=True, allow_unused=True)
-    total = torch.zeros(())
+    total = torch.zeros((), device=params[0].device)
     for g in grads:
         if g is not None:
             total = total + g.pow(2).sum()
@@ -736,6 +831,7 @@ def _train_pinn_adam_ntk_reweighted(
     update_every: int = 10,
     alpha: float = 0.9,
     field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
+    device: torch.device = torch.device("cpu"),
 ) -> torch.nn.Module:
     # NTK-based adaptive loss-term reweighting (Wang, Teng, Perdikaris, "Understanding and
     # Mitigating Gradient Flow Pathologies in Physics-Informed Neural Networks," SIAM J. Sci.
@@ -759,7 +855,7 @@ def _train_pinn_adam_ntk_reweighted(
 
     for step in range(steps):
         optimizer.zero_grad()
-        points = _sample_points(n_collocation, n_boundary, n_initial, t_max=t_max)
+        points = _sample_points(n_collocation, n_boundary, n_initial, t_max=t_max, device=device)
         loss_pde, loss_bc, loss_ic, loss_ic_dot = _pinn_loss_components(
             model, *points, field_fn=field_fn
         )
@@ -793,16 +889,27 @@ def train_cavity_ntk_reweighted_long_horizon(
     horizon_periods: float = 5.0,
     update_every: int = 10,
     alpha: float = 0.9,
+    device: torch.device | str | None = None,
 ) -> CavityPINN:
     # issue #34: same shipped architecture/step budget/point counts/lr as
     # train_cavity_long_horizon (issue #23) -- the only variable is per-loss-term weighting via
     # NTK-based adaptive reweighting (see _train_pinn_adam_ntk_reweighted) instead of issue #23's
     # causal per-time-chunk reweighting or uniform weighting.
+    device = resolve_device(device)
     torch.manual_seed(seed)
-    model = CavityPINN(hidden=32, num_layers=3)
+    model = CavityPINN(hidden=32, num_layers=3).to(device)
     t_max = horizon_periods * PERIOD
     return _train_pinn_adam_ntk_reweighted(
-        model, steps, n_collocation, n_boundary, n_initial, lr, t_max, update_every, alpha
+        model,
+        steps,
+        n_collocation,
+        n_boundary,
+        n_initial,
+        lr,
+        t_max,
+        update_every,
+        alpha,
+        device=device,
     )
 
 
@@ -885,6 +992,7 @@ def _train_pinn_adam_antitrivial(
     t_max: float,
     lambda_grad: float = 1.0,
     field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
+    device: torch.device = torch.device("cpu"),
 ) -> torch.nn.Module:
     # Single-threaded for the same reason as _train_pinn_soap/_train_pseudo_sequence_pinn_adam:
     # the anti-trivial penalty needs a third-order derivative (one more autograd.grad call beyond
@@ -899,7 +1007,9 @@ def _train_pinn_adam_antitrivial(
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
         for _ in range(steps):
             optimizer.zero_grad()
-            points = _sample_points(n_collocation, n_boundary, n_initial, t_max=t_max)
+            points = _sample_points(
+                n_collocation, n_boundary, n_initial, t_max=t_max, device=device
+            )
             loss = _antitrivial_pinn_loss(
                 model, *points, field_fn=field_fn, lambda_grad=lambda_grad
             )
@@ -920,16 +1030,18 @@ def train_cavity_antitrivial_long_horizon(
     lr: float = 3e-3,
     horizon_periods: float = 5.0,
     lambda_grad: float = 1.0,
+    device: torch.device | str | None = None,
 ) -> CavityPINN:
     # issue #35: same shipped architecture/step budget/point counts/lr as
     # train_cavity_long_horizon (issue #23) -- the only variable is the added anti-trivial-solution
     # regularization term (_antitrivial_pinn_loss), per Leiteritz & Pflueger (arXiv:2112.05620),
     # instead of uniform/causal/curriculum/NTK-reweighted loss handling.
+    device = resolve_device(device)
     torch.manual_seed(seed)
-    model = CavityPINN(hidden=32, num_layers=3)
+    model = CavityPINN(hidden=32, num_layers=3).to(device)
     t_max = horizon_periods * PERIOD
     return _train_pinn_adam_antitrivial(
-        model, steps, n_collocation, n_boundary, n_initial, lr, t_max, lambda_grad
+        model, steps, n_collocation, n_boundary, n_initial, lr, t_max, lambda_grad, device=device
     )
 
 
@@ -976,6 +1088,7 @@ def train_cavity_neusa_long_horizon(
     hidden: int = 16,
     eps: float = 0.1,
     field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
+    device: torch.device | str | None = None,
 ) -> NeuSACavityPINN:
     # issue #36: NeuSA against the long-horizon collapse (issue #23) -- a genuinely different
     # architecture, not another loss/schedule change layered on the plain coordinate MLP every
@@ -1000,8 +1113,14 @@ def train_cavity_neusa_long_horizon(
     # property (a learned vector field integrated fresh at eval time, independent of how long it
     # was trained), unlike every plain-MLP fix in this thread, which needed points sampled across
     # the *whole* eval domain to have any chance of fitting it.
+    #
+    # device is applied via .to(device) *after* construction: NeuSACavityPINN's __init__ builds
+    # state0/omega_sq (see model.py) via CPU-only quadrature helpers regardless, and .to(device)
+    # moves the whole module -- buffers included -- together, same as every other model here.
+    device = resolve_device(device)
     torch.manual_seed(seed)
     model = NeuSACavityPINN(num_modes=num_modes, hidden=hidden, eps=eps, field_fn=field_fn)
+    model = model.to(device)
     train_t_max = train_horizon_periods * PERIOD
     return _train_pinn_neusa(model, steps, lr, train_t_max)
 
@@ -1012,6 +1131,7 @@ def _r3_update_pool(
     residual: torch.Tensor,
     n_collocation: int,
     t_max: float,
+    device: torch.device = torch.device("cpu"),
 ) -> tuple[torch.Tensor, torch.Tensor]:
     # Daw, Bu, Wang, Perdikaris, Karpatne, "Mitigating Propagation Failures in Physics-Informed
     # Neural Networks using Retain-Resample-Release (R3) Sampling" (ICML 2023, arXiv:2207.02338):
@@ -1031,8 +1151,8 @@ def _r3_update_pool(
     x_retain = x_c[retain_mask]
     t_retain = t_c[retain_mask]
     n_resample = n_collocation - x_retain.shape[0]
-    x_new = torch.rand(n_resample, 1) * L
-    t_new = torch.rand(n_resample, 1) * t_max
+    x_new = torch.rand(n_resample, 1, device=device) * L
+    t_new = torch.rand(n_resample, 1, device=device) * t_max
     return torch.cat([x_retain, x_new]), torch.cat([t_retain, t_new])
 
 
@@ -1045,6 +1165,7 @@ def _train_pinn_adam_r3(
     lr: float,
     t_max: float,
     field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
+    device: torch.device = torch.device("cpu"),
 ) -> torch.nn.Module:
     # R3 (see _r3_update_pool) only changes how the *collocation* (PDE-residual) points evolve
     # across steps -- BC/IC points stay freshly uniform-random every step, unchanged from every
@@ -1053,16 +1174,16 @@ def _train_pinn_adam_r3(
     # distribution _sample_points would give at step 0) and evolves via retain-resample-release
     # from there.
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    x_c = torch.rand(n_collocation, 1) * L
-    t_c = torch.rand(n_collocation, 1) * t_max
+    x_c = torch.rand(n_collocation, 1, device=device) * L
+    t_c = torch.rand(n_collocation, 1, device=device) * t_max
 
     for _ in range(steps):
         optimizer.zero_grad()
-        t_b = torch.rand(n_boundary, 1) * t_max
-        x_b0 = torch.zeros(n_boundary, 1)
-        x_bl = torch.full((n_boundary, 1), L)
-        x_i = torch.rand(n_initial, 1) * L
-        t_i = torch.zeros(n_initial, 1)
+        t_b = torch.rand(n_boundary, 1, device=device) * t_max
+        x_b0 = torch.zeros(n_boundary, 1, device=device)
+        x_bl = torch.full((n_boundary, 1), L, device=device)
+        x_i = torch.rand(n_initial, 1, device=device) * L
+        t_i = torch.zeros(n_initial, 1, device=device)
 
         residual = pde_residual(model, x_c, t_c)
         loss_pde = (residual**2).mean()
@@ -1083,7 +1204,7 @@ def _train_pinn_adam_r3(
         # Retain-resample-release for the *next* step, reusing this step's already-computed
         # residual (pre-update) -- no extra forward pass, matching the paper's own claim that R3
         # adds negligible computational overhead over uniform resampling.
-        x_c, t_c = _r3_update_pool(x_c, t_c, residual, n_collocation, t_max)
+        x_c, t_c = _r3_update_pool(x_c, t_c, residual, n_collocation, t_max, device=device)
 
     return model
 
@@ -1096,6 +1217,7 @@ def train_cavity_r3_long_horizon(
     n_initial: int = 64,
     lr: float = 3e-3,
     horizon_periods: float = 5.0,
+    device: torch.device | str | None = None,
 ) -> CavityPINN:
     # issue #37: same shipped architecture/step budget/point counts/lr as
     # train_cavity_long_horizon (issue #23) -- the only variable is swapping uniform-random
@@ -1104,10 +1226,13 @@ def train_cavity_r3_long_horizon(
     # (loss-reweighting, architecture, training schedule, and an anti-trivial-solution penalty,
     # respectively) or #36 (a different architecture family) -- this is the first attempt at the
     # collocation-sampling strategy itself.
+    device = resolve_device(device)
     torch.manual_seed(seed)
-    model = CavityPINN(hidden=32, num_layers=3)
+    model = CavityPINN(hidden=32, num_layers=3).to(device)
     t_max = horizon_periods * PERIOD
-    return _train_pinn_adam_r3(model, steps, n_collocation, n_boundary, n_initial, lr, t_max)
+    return _train_pinn_adam_r3(
+        model, steps, n_collocation, n_boundary, n_initial, lr, t_max, device=device
+    )
 
 
 def _dielectric_pinn_loss(
@@ -1145,11 +1270,14 @@ def _train_dielectric_pinn_adam(
     n_boundary: int,
     n_initial: int,
     lr: float,
+    device: torch.device = torch.device("cpu"),
 ) -> torch.nn.Module:
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     for _ in range(steps):
         optimizer.zero_grad()
-        points = _sample_points(n_collocation, n_boundary, n_initial, t_max=DIELECTRIC_PERIOD)
+        points = _sample_points(
+            n_collocation, n_boundary, n_initial, t_max=DIELECTRIC_PERIOD, device=device
+        )
         loss = _dielectric_pinn_loss(model, *points)
         loss.backward()
         optimizer.step()
@@ -1165,15 +1293,19 @@ def train_dielectric_cavity(
     n_boundary: int = 64,
     n_initial: int = 64,
     lr: float = 3e-3,
+    device: torch.device | str | None = None,
 ) -> CavityPINN:
     # issue #46: same CavityPINN architecture family/training recipe as train_cavity_baseline
     # (plain coordinate MLP, Adam, same step/point-count/lr defaults) -- hidden is the swept
     # capacity variable (num_layers held fixed at 3, the baseline depth), everything else held at
     # the project's standard single-mode recipe so this is a controlled comparison against #25's
     # capacity finding, not a differently-tuned training setup entangled with the new physics.
+    device = resolve_device(device)
     torch.manual_seed(seed)
-    model = CavityPINN(hidden=hidden, num_layers=num_layers)
-    return _train_dielectric_pinn_adam(model, steps, n_collocation, n_boundary, n_initial, lr)
+    model = CavityPINN(hidden=hidden, num_layers=num_layers).to(device)
+    return _train_dielectric_pinn_adam(
+        model, steps, n_collocation, n_boundary, n_initial, lr, device=device
+    )
 
 
 def evaluate_relative_l2_error(
@@ -1182,13 +1314,18 @@ def evaluate_relative_l2_error(
     field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
     t_max: float = PERIOD,
     dtype: torch.dtype = torch.float32,
+    device: torch.device | str | None = None,
 ) -> float:
     # dtype=torch.float32 (default) preserves existing behavior bit-for-bit. Must match the
     # model's own parameter dtype (issue #38's FP64 models need dtype=torch.float64 here too) --
     # a dtype mismatch between input and model weights errors inside the first Linear layer.
+    # device=None (default) preserves existing behavior bit-for-bit; callers evaluating a model
+    # trained on a non-CPU device must pass the matching device=... here too, same as dtype --
+    # this function doesn't infer it from the model's own parameters.
+    device = resolve_device(device)
     torch.manual_seed(seed)
-    x = torch.rand(500, 1, dtype=dtype) * L
-    t = torch.rand(500, 1, dtype=dtype) * t_max
+    x = torch.rand(500, 1, dtype=dtype, device=device) * L
+    t = torch.rand(500, 1, dtype=dtype, device=device) * t_max
     with torch.no_grad():
         predicted = model(x, t)
         true = field_fn(x, t)
@@ -1202,21 +1339,30 @@ def evaluate_field_grid(
     x_range: tuple[float, float] = (0.0, L),
     n_x: int = 100,
     n_t: int = 100,
+    device: torch.device | str | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     # Evaluates a trained model + its ground-truth field over a regular (x, t) grid and returns
     # plain numpy arrays (x_grid, t_grid, predicted, true) -- mx_viz.fields.plot_field_heatmap
     # takes numpy arrays rather than model objects to stay framework-agnostic (see tools/viz's
     # CLAUDE.md-equivalent rationale); this is the torch-specific "evaluate over a grid" half that
-    # belongs here, not in the plotting library.
-    xs = torch.linspace(x_range[0], x_range[1], n_x)
-    ts = torch.linspace(0.0, t_max, n_t)
+    # belongs here, not in the plotting library. device=None (default) preserves existing
+    # behavior bit-for-bit; a non-CPU device must be moved back via .cpu() before .numpy() (numpy
+    # can't view CUDA memory), a no-op on the CPU default path.
+    device = resolve_device(device)
+    xs = torch.linspace(x_range[0], x_range[1], n_x, device=device)
+    ts = torch.linspace(0.0, t_max, n_t, device=device)
     grid_x, grid_t = torch.meshgrid(xs, ts, indexing="xy")
     x_flat = grid_x.reshape(-1, 1)
     t_flat = grid_t.reshape(-1, 1)
     with torch.no_grad():
         predicted = model(x_flat, t_flat).reshape(grid_x.shape)
         true = field_fn(x_flat, t_flat).reshape(grid_x.shape)
-    return grid_x.numpy(), grid_t.numpy(), predicted.numpy(), true.numpy()
+    return (
+        grid_x.cpu().numpy(),
+        grid_t.cpu().numpy(),
+        predicted.cpu().numpy(),
+        true.cpu().numpy(),
+    )
 
 
 def evaluate_field_slice(
@@ -1224,16 +1370,20 @@ def evaluate_field_slice(
     t_values: Sequence[float],
     field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
     x: float = 0.5,
+    device: torch.device | str | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     # Evaluates predicted vs. true field across t_values at a fixed x -- the numeric half of the
     # pointwise checks this project has hand-tabulated as CLAUDE.md markdown tables since issue
-    # #23; mx_viz.fields.plot_field_slice turns the same arrays into a line plot.
-    t = torch.tensor(t_values, dtype=torch.float32).reshape(-1, 1)
+    # #23; mx_viz.fields.plot_field_slice turns the same arrays into a line plot. device=None
+    # (default) preserves existing behavior bit-for-bit; see evaluate_field_grid for the
+    # .cpu().numpy() rationale.
+    device = resolve_device(device)
+    t = torch.tensor(t_values, dtype=torch.float32, device=device).reshape(-1, 1)
     x_t = torch.full_like(t, x)
     with torch.no_grad():
         predicted = model(x_t, t).reshape(-1)
         true = field_fn(x_t, t).reshape(-1)
-    return predicted.numpy(), true.numpy()
+    return predicted.cpu().numpy(), true.cpu().numpy()
 
 
 def main() -> None:

@@ -197,7 +197,11 @@ def _rk4_integrate(
         k4 = model.vector_field(state + h * k3)
         state = state + (h / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
         states.append(state)
-    grid = torch.linspace(0.0, t_max, n_steps + 1)
+    # device=state.device (device-abstraction Arc, Slice 2, issue #59): must match `states` for
+    # _interpolate_trajectory's torch.searchsorted call below, which requires both operands on
+    # the same device -- extends this file's existing device=x.device idiom (_sine_basis/
+    # _pseudo_sequence).
+    grid = torch.linspace(0.0, t_max, n_steps + 1, device=state.device)
     return grid, torch.stack(states)
 
 
