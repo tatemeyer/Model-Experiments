@@ -3,7 +3,7 @@ title: "Arc Charter — device-abstraction"
 design: 2026-07-28-em-piml-modernization
 arc: 2026-07-30-device-abstraction
 slice: 2026-07-30-charter
-revision: B
+revision: C
 status: proposed
 date: 2026-07-30
 related-arcs: [jax-migration, cloud-compute-ops]
@@ -99,6 +99,13 @@ re-litigate the parent's constraints.
     (~20 TPU-hrs/week) and Google TRC among its ranked providers — must
     not assume this Arc's device abstraction unblocks TPU workloads; it
     unblocks CUDA (GPU) only.
+  - **Apple Silicon (`mps` backend)** — restored explicitly in Rev-C after
+    being silently dropped in Rev-B (Convention-alignment re-review
+    finding, see §13). `CONVENTIONS.md:44-51` doesn't mention Apple
+    Silicon, and the owner's observed working environment is Windows; §5's
+    device-string allowlist (`cpu`, `cuda`, `cuda:<n>`) already enforces
+    this by omission, but the exclusion is a deliberate decision, not an
+    accident, and belongs here on the record.
 
 ## 4. Reconciliation with existing `CONVENTIONS.md` entries
 
@@ -159,7 +166,21 @@ own; it needs to be read in full, which Rev-B now does.
   bit-identical-output comparison against pre-Arc `main` for the CPU
   default path specifically — not a loose threshold assertion (the
   existing suite's `relative_l2 < 0.1`-style checks would not catch a
-  shifted RNG stream).
+  shifted RNG stream). **Mechanism named explicitly** (§13 re-review
+  finding N4, since Rev-B stated the requirement without a way to actually
+  run it): a small set of golden output values (final loss, or a
+  representative output tensor's hash) generated from pre-Arc `main` for a
+  handful of representative `train_*`/`_train_*` functions, checked into
+  the test fixtures as part of Slice 2's own PR, compared bit-for-bit
+  against the same functions post-threading. This does not require running
+  two git revisions in the same CI job — the golden values are static
+  fixtures, generated once by the PR author before threading, and asserted
+  against after. Given every em-piml training test is already `slow`
+  (35-100s+ apiece, `CONVENTIONS.md:106-108`) and this Slice touches 19
+  public + 10 private training functions, this verification does not need
+  to cover all of them — a representative sample (at minimum, one function
+  per distinct optimizer path: Adam, L-BFGS, SOAP) is sufficient, and
+  Slice 2's PR should state which functions were sampled and why.
 - **`torch.Generator` is device-bound** (Technical feasibility gate
   finding, see §12): `train.py:357` and `:434` construct
   `torch.Generator().manual_seed(points_seed)` — a CPU generator — passed
@@ -182,31 +203,66 @@ own; it needs to be read in full, which Rev-B now does.
   `pyproject.toml`'s `markers` list, (b) changing `addopts` to `-m 'not
   slow and not gpu'`, and (c) changing `.github/workflows/ci.yml`'s slow
   step to `-m 'slow and not gpu'`. These three edits are Slice 1's own
-  scope (§6), not deferred to Slice 3.
+  scope (§6), not deferred to Slice 3. **A fourth edit belongs with them**
+  (§13 re-review finding N7): `CONVENTIONS.md:118-119` documents `uv run
+  pytest -m slow` and `uv run pytest -o addopts=""` as the local
+  full-suite/slow-only commands — a bare `-m` on the command line
+  *overrides* `addopts` rather than ANDing with it, so both documented
+  commands would silently start selecting `gpu`-marked tests on a
+  GPU-less local machine after this change. The new dated `CONVENTIONS.md`
+  entry this bullet already requires (below) must supersede those two
+  documented commands with their `and not gpu` equivalents, not just
+  describe the new marker in isolation.
 - Any test requiring actual GPU hardware carries `@pytest.mark.gpu`, lives
   colocated in `projects/em-piml/tests/` per `CONVENTIONS.md`'s testing
   entry (no top-level `tests/` tree), and is excluded from the default
   fast/slow CI split by the mechanism above.
 - **This Arc's third-party-dependency footprint is a packaging change, not
-  a package addition** (Technical feasibility / License-compliance gate
-  findings, see §12): `uv.lock:1094-1111` locks `torch` 2.13.0 from
-  `pypi.org`, whose CUDA-runtime dependencies (`cuda-bindings`,
-  `nvidia-cudnn-cu13`, `nvidia-nccl-cu13`, `triton`, etc.) all carry
-  `marker = "sys_platform == 'linux'"` — the Windows wheel ships with no
-  CUDA runtime at all, a gap `projects/em-piml/CLAUDE.md`'s own "Known
-  deferred items" section already records as unresolved. Making CUDA
-  actually usable on the owner's Windows environment requires switching
-  `torch`'s source to the PyTorch CUDA wheel index
-  (`[[tool.uv.index]]`/`[tool.uv.sources]`), not adding a new PyPI package.
-  If a Slice does this: (a) the index must be pinned so only `torch`
-  resolves from it (`explicit = true` on the `[[tool.uv.index]]` entry,
-  per this repo's existing supply-chain posture —
-  `CONVENTIONS.md:69-78`'s SHA-pinned-Actions entry, motivated by the
-  `trivy-action` incident — extended here to package indices); (b) the
-  NVIDIA CUDA EULA / cuDNN SLA governing the pulled redistributables gets
-  the same license-file-not-just-metadata check the parent Design Charter
-  already applies to every other dependency (parent §5); (c) the resulting
-  `uv.lock` diff carries `autonomy:review`, same as a CI-workflow diff.
+  a package addition, and it is `gpu-selection-verification`'s (Slice 3)
+  own scope to make, not conditional future work** (Technical feasibility
+  / License-compliance gate findings, see §12 and §13 re-review finding
+  N1): `uv.lock:1094-1111` locks `torch` 2.13.0 from `pypi.org`, whose
+  CUDA-runtime dependencies (`cuda-bindings`, `nvidia-cudnn-cu13`,
+  `nvidia-nccl-cu13`, `triton`, etc.) all carry `marker = "sys_platform ==
+  'linux'"` — the Windows wheel ships with no CUDA runtime at all
+  (independently confirmed: the repo's own venv reports `torch
+  2.13.0+cpu`, `torch.version.cuda is None`). **Corrected citation** (§13
+  re-review finding N3): the gap this creates is *not* what
+  `projects/em-piml/CLAUDE.md`'s "Known deferred items" section records —
+  that entry (lines 267-272) is about installing the **CPU-only** PyTorch
+  wheel index to shrink an unnecessarily large install, the opposite
+  direction from what this bullet proposes. Both are legitimate,
+  independent needs for the same package on different platforms, and
+  they're reconciled below rather than left in tension.
+  - Making CUDA actually usable on the owner's Windows environment
+    requires switching `torch`'s source to the PyTorch CUDA wheel index
+    (`[[tool.uv.index]]`/`[tool.uv.sources]`), not adding a new PyPI
+    package. Slice 3 does this as part of its own scope (§6) — not "if a
+    Slice does this."
+  - **The source entry must be platform-scoped** (§13 re-review finding
+    N2): `[[tool.uv.index]]`/`[tool.uv.sources]` resolve at the workspace
+    root, and CI (`ubuntu-latest`) runs `uv sync --all-packages` — an
+    unguarded source change would relock and re-source `torch` for CI's
+    Linux runner too, an unjustified third change to shared CI surface
+    beyond the two §2 already names. The `[tool.uv.sources] torch = {
+    index = ..., marker = "sys_platform == 'win32'" }` form (or
+    equivalent) confines this to Windows; CI's resolved `torch` on Linux
+    must be unchanged, and that's a specific thing to check on the
+    `uv.lock` diff, not just "did it not break."
+  - This also closes the repo's actual standing deferred item cleanly: a
+    platform-split source (the CUDA index on `win32`, the existing
+    CPU-only-index intent from `projects/em-piml/CLAUDE.md:267-272` on
+    other platforms) satisfies both needs for the same package at once.
+  - The index must be pinned so only `torch` resolves from it (`explicit =
+    true` on the `[[tool.uv.index]]` entry, per this repo's existing
+    supply-chain posture — `CONVENTIONS.md:69-78`'s SHA-pinned-Actions
+    entry, motivated by the `trivy-action` incident — extended here to
+    package indices).
+  - The NVIDIA CUDA EULA / cuDNN SLA governing the pulled redistributables
+    gets the same license-file-not-just-metadata check the parent Design
+    Charter already applies to every other dependency (parent §5).
+  - The resulting `uv.lock` diff carries `autonomy:review`, same as a
+    CI-workflow diff.
 - **A diff to root `pyproject.toml`'s `[tool.pytest.ini_options]`
   (markers or `addopts`) is treated identically to a CI-workflow-file diff
   for autonomy-labeling purposes** (Security gate finding, see §12) — it
@@ -226,8 +282,8 @@ own; it needs to be read in full, which Rev-B now does.
 | Slice | Scope | Verifiable by | Issue |
 |---|---|---|---|
 | `device-selection-module` | Device-resolution helper (function-keyword primary, thin CLI/env wrapper); default-vs-explicit-request error semantics (§5); device-string validation and CLI-over-env precedence (§5); registers the `gpu` pytest marker and edits root `pyproject.toml`'s `addopts` and `.github/workflows/ci.yml`'s slow step (§5) — **this Slice's PR modifies `.github/workflows/ci.yml` and root `pyproject.toml`'s test config, so it carries `autonomy:review`, not `autonomy:safe`** (§2, §5) | CI — no hardware needed | [#57](https://github.com/tatemeyer/Model-Experiments/issues/57) |
-| `training-loop-threading` | Thread the resolved device through **all** tensor-construction call sites, not just `train.py` (1294 lines): also `physics.py`, `dielectric.py`, `embeddings.py`, `model.py` (extending the existing `device=x.device` pattern at `model.py:73`/`:160`), and the `evaluate_relative_l2_error`/`evaluate_field_grid`/`evaluate_field_slice` functions (`train.py:1179`/`:1198`/`:1222`) every test calls. Covers 19 public `train_*` entry points and 9 private `_train_*` inner loops across 18 documented experiments — **corrected from Rev-A's "~10 experiments," which understated this by roughly 2x** (Technical feasibility gate finding, see §12). Handles the `torch.Generator` device-binding at `train.py:357`/`:434` per §5. | CI (CPU-path only, bit-identical-output verification per §5) + code review, per-variant | [#59](https://github.com/tatemeyer/Model-Experiments/issues/59) |
-| `gpu-selection-verification` | Manual, interactive confirmation that device selection actually places tensors on an accelerator when requested; records wall-clock CPU-vs-accelerator timing for at least one FP32 long-horizon variant and one FP64 variant (per §5's compute-assumption reconciliation — the owner's named GPU, a GTX 1660 Ti, runs FP64 at roughly 1/32 of FP32 throughput, so "GPU is slower for this workload" is a real possible, acceptable conclusion, not just "GPU works"); recorded in an experiment write-up. **Actual blocker is packaging (§5's wheel-index bullet), not hardware access** — corrected from Rev-A, which misdiagnosed this as possibly needing to wait on `cloud-compute-ops` (Cost/compute-budget gate finding, see §12); this Slice is expected to complete locally against the owner's existing GTX 1660 Ti with no `cloud-compute-ops` dependency, preserving this Arc's Tier-1 (no-new-usage-constraint) status. | Manual/interactive only — requires actual hardware; gated by the `gpu` marker from Slice 1 | [#60](https://github.com/tatemeyer/Model-Experiments/issues/60) |
+| `training-loop-threading` | Thread the resolved device through **all** tensor-construction call sites, not just `train.py` (1294 lines): also `physics.py`, `dielectric.py`, `embeddings.py`, `model.py` (extending the existing `device=x.device` pattern at `model.py:73`/`:160`), and the `evaluate_relative_l2_error`/`evaluate_field_grid`/`evaluate_field_slice` functions (`train.py:1179`/`:1198`/`:1222`) every test calls. Covers 19 public `train_*` entry points and **10** private `_train_*` inner loops (corrected in Rev-C — §13 re-review finding N5) across 18 documented experiments — corrected from Rev-A's "~10 experiments," which understated this by roughly 2x (Technical feasibility gate finding, see §12). Handles the `torch.Generator` device-binding at `train.py:357`/`:434` per §5. Bit-exactness verified via golden-value fixtures for a representative sample (one function per optimizer path minimum), per §5. | CI (CPU-path only, golden-value bit-identical comparison per §5) + code review, per-variant | [#59](https://github.com/tatemeyer/Model-Experiments/issues/59) |
+| `gpu-selection-verification` | **Includes the CUDA-wheel-index packaging fix as its own scope** (§13 re-review finding N1 — Rev-B left this as a conditional "if a Slice does this" that no Slice owned; corrected here to match what Issue #60 already scopes): switch `torch`'s source to the PyTorch CUDA wheel index, platform-scoped to `win32` only (§5), pinned so only `torch` resolves from it. Then: manual, interactive confirmation that device selection actually places tensors on an accelerator when requested; records wall-clock CPU-vs-accelerator timing for at least one FP32 long-horizon variant and one FP64 variant (per §5's compute-assumption reconciliation — the owner's named GPU, a GTX 1660 Ti, runs FP64 at roughly 1/32 of FP32 throughput, so "GPU is slower for this workload" is a real possible, acceptable conclusion, not just "GPU works"); records the resolved device in `results.csv`'s `params` column per §5; recorded in an experiment write-up per the determinism-verification convention at `projects/em-piml/CLAUDE.md:63-65` (corrected citation — §13 re-review finding, previously uncited after Rev-B removed the false "this repo's existing... convention" phrasing without replacing it). No `cloud-compute-ops` dependency — this Slice completes locally against the owner's existing GTX 1660 Ti, preserving this Arc's Tier-1 (no-new-usage-constraint) status. | Manual/interactive only — requires actual hardware; gated by the `gpu` marker from Slice 1 | [#60](https://github.com/tatemeyer/Model-Experiments/issues/60) |
 
 ## 7. Cross-cutting gaps / risks specific to this Arc
 
@@ -242,14 +298,22 @@ own; it needs to be read in full, which Rev-B now does.
 
 ## 8. Relationship to the Issue/PR loop
 
-Each Slice above becomes its own Intent Issue + PR once this Arc Charter
-reaches Rev-0, per the parent Design Charter's §8 / `docs/design/README.md`'s
-process. **`device-selection-module`'s PR specifically modifies
+**Corrected in Rev-C to match reality** (§13 re-review finding N10):
+Intent Issues #57 (`device-selection-module`), #59
+(`training-loop-threading`), and #60 (`gpu-selection-verification`,
+including the packaging fix per §6) already exist, opened ahead of this
+Arc Charter reaching Rev-0 at the owner's explicit direction — Rev-B's
+"becomes its own Intent Issue + PR once this Arc Charter reaches Rev-0"
+phrasing was aspirational process language that had already been
+overtaken by actual practice. All three carry `autonomy:review`
+(verified), consistent with `device-selection-module`'s PR modifying
 `.github/workflows/ci.yml` and root `pyproject.toml`'s pytest
-configuration, and therefore carries `autonomy:review`, never
-`autonomy:safe`, per §2/§5's inherited carve-out.**
+configuration per §2/§5's inherited carve-out, and
+`gpu-selection-verification`'s PR modifying `uv.lock`/index config per §5.
+Each Issue is kept in sync with this Charter's own findings as revisions
+land (as this Rev-C update itself does).
 
-## 9. Gates — Rev-B
+## 9. Gates — Rev-C
 
 - [ ] Security
 - [ ] License/compliance
@@ -258,10 +322,16 @@ configuration, and therefore carries `autonomy:review`, never
 - [ ] Convention-alignment
 - [ ] Goal-delivery
 
-Not yet independently re-reviewed. Rev-B incorporates every finding from
-the Rev-A review round (§12) — three of which (§12: TF-1, CA-1, and the
-combined GD-1/GD-2 pair) were flagged as individually disqualifying in that
-round. A fresh gate pass is warranted before treating any gate as cleared.
+Not yet independently re-reviewed against Rev-C. An independent re-review
+of Rev-B (§13) found 18 of 22 Rev-A findings fully resolved and 4 partially
+resolved, plus 10 new findings in Rev-B's own text (1 High disqualifying —
+N1, the CUDA-packaging fix left unowned) — all incorporated into this
+revision. Per that re-review's own gate-by-gate read: Security and
+License/compliance were assessed as clearable as Rev-B stood; Goal-delivery,
+Technical feasibility, and Convention-alignment were held pending exactly
+the fixes this revision makes. A fresh pass against Rev-C is still
+warranted before treating any gate as formally cleared — this section
+records the re-review's assessment, not an independent gate clearance.
 
 ## 10. Open questions
 
@@ -274,6 +344,13 @@ round. A fresh gate pass is warranted before treating any gate as cleared.
   proposed back to the parent Design Charter as a Change Order once it
   reaches Rev-0, generalizing the CI-workflow-file carve-out to cover
   test-selection-affecting config more broadly.
+- **Restored from Rev-A, dropped in Rev-B without being answered** (§13
+  re-review finding N10): does `gpu-selection-verification` block this
+  Arc's own Rev-0, or can it run opportunistically once hardware/packaging
+  allows, without holding up Slices 1-2's completion? Now sharper than in
+  Rev-A, since Slice 3 has a real, scoped packaging prerequisite (§6)
+  rather than an open-ended hardware-access question — still not decided
+  by this document.
 
 ## 11. Rollback / abandonment path
 
@@ -328,9 +405,49 @@ otherwise well-shaped and the project-scoped placement decision (§3) is
 correct and well-argued." All findings above are incorporated into this
 revision; no gate has been independently re-checked against Rev-B yet (§9).
 
+## 13. Re-review findings (Rev-B → Rev-C)
+
+Performed by a second, independent review agent (not the one that produced
+§12), whose job was specifically to verify — not assume — that Rev-B's
+claimed remedies actually hold: for each of §12's 22 findings, it
+independently re-derived the underlying facts (grep/read the real
+codebase) rather than trusting Rev-B's own citations, then separately
+searched Rev-B's new text for problems Rev-A didn't have.
+
+**Tally against the 22 Rev-A findings: 18 RESOLVED, 4 PARTIALLY RESOLVED, 0
+NOT RESOLVED.** The four partial: TF-1 (blocker correctly diagnosed but
+left as "if a Slice does this," owned by no Slice — see N1 below), TF-4
+(experiment count corrected but the private-function count itself was off
+by one, 9 vs. the actual 10 — see N5), CA-3 (the false citation was
+deleted but the real one, `projects/em-piml/CLAUDE.md:63-65`, was never
+added — see N5's remedy applied at §6), and C1's sibling in the other
+Arc Charter is not applicable here.
+
+| # | Finding | Severity | Addressed in |
+|---|---|---|---|
+| N1 | Slice 3's CUDA-packaging fix was conditional ("if a Slice does this") and owned by no Slice, functionally leaving the Rev-A Critical (TF-1) open, even as Issue #60 had already silently absorbed the scope the Charter withheld | High | §5, §6 (Slice 3 row, now assertive and explicit) |
+| N2 | The proposed torch-source redirect wasn't platform-scoped — could silently change what CI resolves for `torch` on Linux too, an unjustified third change beyond the two §2 names | High | §5 (platform-marker requirement) |
+| N3 | The "known deferred item" citation was wrong — `projects/em-piml/CLAUDE.md:267-272` is about a CPU-only wheel index (the opposite direction), not a record of the CUDA gap | Medium | §5 (citation corrected, conflict reconciled via a platform-split source) |
+| N4 | Bit-exactness verification (GD-2's remedy) had no stated mechanism or CI runtime budget | Medium | §5, §6 (Slice 2 row: golden-value fixtures, representative sampling) |
+| N5 | "9 private `_train_*`" underscores the correction it's making — the real count is 10 | Low | §6 (Slice 2 row) |
+| N6 | Revision History's Rev-B row severity tally didn't sum to its own table (said 6 High, table has 7) | Low | Revision History (corrected below) |
+| N7 | `CONVENTIONS.md`'s documented local slow-test commands would silently start selecting `gpu`-marked tests, since command-line `-m` overrides `addopts` | Low | §5 (marker bullet, fourth edit named) |
+| N8 | Rev-A's deliberate `mps`-exclusion decision was deleted rather than carried forward, turning a decision into an accident | Low | §3 (restored) |
+| N9 | `results.csv` device-recording constraint had no owning Slice | Medium | §6 (Slice 3 row, explicit ownership) |
+| N10 | Rev-A's open question about whether GPU verification blocks the Arc's Rev-0 was dropped unanswered; §8 also claimed Issues wouldn't exist until Rev-0, when #57/#59/#60 already did | Low | §8 (corrected), §10 (question restored) |
+
+Overall verdict from the re-review (verbatim): "Rev-B is a large and
+genuinely well-grounded improvement — but not yet sound enough to treat
+all six gates as cleared... What blocks clearance is that the Rev-A
+Critical (TF-1) is documented but not closed... None of this requires
+rethinking the Arc's shape. Slices 1 and 2 are well-specified and
+buildable as written." All ten new findings are incorporated into this
+revision.
+
 ## Revision History
 
 | Rev | Date | Summary of changes | Gates cleared |
 |---|---|---|---|
 | A | 2026-07-30 | Initial draft | (pending) |
-| B | 2026-07-30 | Full six-gate review (22 findings: 2 Critical, 6 High, 12 Medium, 1 Low) incorporated. Corrected the CUDA-on-Windows packaging blocker (§5), the non-functional `@pytest.mark.gpu` exclusion mechanism (§5/§6), split default-vs-explicit-request device error semantics and added a CPU-path bit-exactness requirement (§5), added a `CONVENTIONS.md` reconciliation section (§4, new), widened Slice 2's actual surface and corrected its experiment count (§6), corrected Slice 3's blocker diagnosis from hardware-access to packaging (§6), switched the primary mechanism from an unbuildable CLI flag to a function keyword matching this repo's own FP64 precedent (§3), added the inherited `autonomy:review` CI/pytest-config carve-out (§2/§5/§8), and fixed frontmatter per the process doc's own schema. | (pending re-review) |
+| B | 2026-07-30 | Full six-gate review (22 findings: 2 Critical, 7 High, 12 Medium, 1 Low — corrected from an earlier "6 High" miscount, see §13 finding N6) incorporated. Corrected the CUDA-on-Windows packaging blocker (§5), the non-functional `@pytest.mark.gpu` exclusion mechanism (§5/§6), split default-vs-explicit-request device error semantics and added a CPU-path bit-exactness requirement (§5), added a `CONVENTIONS.md` reconciliation section (§4, new), widened Slice 2's actual surface and corrected its experiment count (§6), corrected Slice 3's blocker diagnosis from hardware-access to packaging (§6), switched the primary mechanism from an unbuildable CLI flag to a function keyword matching this repo's own FP64 precedent (§3), added the inherited `autonomy:review` CI/pytest-config carve-out (§2/§5/§8), and fixed frontmatter per the process doc's own schema. | (pending re-review) |
+| C | 2026-07-30 | Independent re-review (§13) verified 18/22 Rev-B remedies fully hold, 4 partially, 0 failed, plus 10 new findings (1 High). Made Slice 3's CUDA-packaging fix assertive and explicitly owned rather than conditional (§5/§6), platform-scoped the proposed torch-source change so it can't silently affect CI's Linux resolution (§5), corrected a wrong citation to `projects/em-piml/CLAUDE.md`'s deferred-items section and reconciled it with this Arc's proposal via a platform-split source (§5), named a concrete golden-value mechanism for bit-exactness verification (§5/§6), restored the deliberately-dropped `mps` exclusion (§3), gave `results.csv` device-recording an explicit Slice owner (§6), added the missing determinism-convention citation (§6), fixed the experiment-count arithmetic and a Revision-History tally error, and corrected §8's Issue/PR-loop description to match the fact that Issues #57/#59/#60 already exist pre-Rev-0. | (pending re-review) |
