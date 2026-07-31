@@ -201,3 +201,35 @@ one row per issue/variant/seed/metric) are two independent data
 contracts that currently don't read from each other — a natural
 follow-up is teaching `mx-viz` to plot directly from `results.csv`
 rows instead of requiring its own JSON export per sweep.
+
+## 2026-07-30 — Testing: `gpu` marker for hardware-gated tests
+
+The `device-abstraction` Arc (`docs/design/specs/2026-07-28-em-piml-modernization/`)
+introduces a second, orthogonal test-exclusion axis alongside the
+existing `slow` marker (2026-07-15 entry, above): hardware availability,
+not runtime. A test that needs actual GPU hardware isn't slow in the
+sense that entry means (it may run in well under a second on hardware
+that has a GPU) — it's simply impossible to run correctly on
+`ubuntu-latest`, which has none. Overloading `slow` for this would let a
+`gpu`-marked test get selected by `uv run pytest -m slow` on a GPU-less
+runner and fail there, not skip.
+
+Mark a test `@pytest.mark.gpu` (registered in `[tool.pytest.ini_options]
+markers`, root `pyproject.toml`) if it requires actual GPU hardware to
+run correctly — as opposed to a test that merely exercises
+device-selection *logic* (e.g. `projects/em-piml/tests/test_device_selection.py`,
+which stays unmarked and fast, since it mocks
+`torch.cuda.is_available()` rather than needing a real GPU). Root
+`pyproject.toml`'s `addopts` is `-m 'not slow and not gpu'` — both
+markers are excluded from the default `uv run pytest` command.
+`.github/workflows/ci.yml`'s "Test (slow)" step runs `uv run pytest -m
+'slow and not gpu'`, so GPU-gated tests stay excluded from CI even
+though `slow` ones run there. Run GPU-gated tests explicitly, on a
+machine that actually has one, with `uv run pytest -m gpu` (GPU tests
+only) or `uv run pytest -o addopts=""` (everything, overriding both
+exclusions) — **this supersedes the 2026-07-15 entry's documented
+`uv run pytest -m slow` and `uv run pytest -o addopts=""` commands**:
+the former now needs `-m 'slow and not gpu'` to avoid also selecting
+GPU-gated tests on a machine without a GPU (a bare `-m` on the command
+line overrides `addopts` rather than ANDing with it); the latter is
+unchanged, since it already runs everything.

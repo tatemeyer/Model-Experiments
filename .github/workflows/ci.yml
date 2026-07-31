@@ -26,4 +26,4 @@ jobs:
         run: uv run pytest
 
       - name: Test (slow)
-        run: uv run pytest -m slow
+        run: uv run pytest -m 'slow and not gpu'
