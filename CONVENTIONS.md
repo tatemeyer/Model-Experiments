@@ -201,3 +201,40 @@ one row per issue/variant/seed/metric) are two independent data
 contracts that currently don't read from each other — a natural
 follow-up is teaching `mx-viz` to plot directly from `results.csv`
 rows instead of requiring its own JSON export per sweep.
+
+## 2026-07-30 — Multi-project gitops: branch naming, labels, worktrees
+
+With a second project (`projects/jepa`) now onboarded alongside
+`em-piml`, formalizing patterns that were already emerging informally
+(confirmed by `git branch -a` history, e.g. `feat/em-piml-ntk-reweighted-
+long-horizon`, `docs/em-piml-arc-charters-tier1`) rather than inventing
+new ones:
+
+- **Branch naming**: `<kind>/<project>-<slug>` (e.g.
+  `feat/jepa-research-scaffold`) when a branch is scoped to one
+  `projects/<name>/` or `tools/<name>/`; plain `<kind>/<slug>` (no
+  project segment) when the change is cross-cutting (root config, CI, a
+  shared tool, this entry itself). No ruleset change needed — the
+  `feature-branches` ruleset already globs `feat/**` etc., which matches
+  the project-scoped form for free. `.github/SETUP.md`'s "Branch naming
+  convention" section is updated to state this explicitly.
+- **Project labels**: `project:<name>` (`project:em-piml`,
+  `project:jepa`, `project:shared` for cross-cutting work) exist as
+  real GitHub labels, applied manually by whoever files the Issue/PR —
+  not by an auto-labeler Action. Two projects don't yet justify building
+  path-mapping automation; add it only if manual mislabeling actually
+  becomes recurring, the same trigger-based-adoption logic as the
+  "Project experiment logs" entry above.
+- **Worktrees**: one mechanism, not two. A session working on a given
+  project uses Claude Code's own worktree isolation (already gitignored
+  via `.claude/`, see PR #14) and checks out/creates that project's
+  branch inside it — project scoping lives in the branch name, worktree
+  scoping lives in the session-isolation mechanism, and the two are
+  orthogonal by design. Don't build a second, project-keyed worktree
+  layout. Caveat worth remembering: each worktree needs its own `uv sync
+  --all-packages` (a separate `.venv`, not shared across worktrees).
+- **CI path-scoping** (running only a touched project's slow tests,
+  rather than the whole workspace's, on every PR) is a good idea in
+  principle but the exact mechanism needs its own focused design pass
+  rather than a rushed edit to the `verify` required check — filed as
+  **issue #71** rather than implemented here.
