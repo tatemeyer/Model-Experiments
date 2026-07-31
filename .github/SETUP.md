@@ -16,6 +16,15 @@ Settings → Labels → New label, for each:
 - `autonomy:review` — implement and open PR, human approves before merge
 - `autonomy:human` — do not implement autonomously
 - `needs-intent` — issue lacks a verifiable success criterion
+- `project:<name>` (e.g. `project:em-piml`, `project:jepa`,
+  `project:shared` for cross-cutting work) — which project an Issue/PR
+  is scoped to, applied manually (see `CONVENTIONS.md`'s 2026-07-30
+  "Multi-project gitops" entry). Note: despite this section's own
+  framing above, these three were in fact created via `gh label create`
+  from a Claude Code session — the `gh` CLI can create labels; this
+  doc's "no GitHub API tool available" claim is stale for label
+  creation specifically (rulesets/Settings pages still need doing by
+  hand).
 
 ## Branch naming convention
 
@@ -27,6 +36,11 @@ Referenced by the rulesets below, so establishing it first:
 - `docs/<slug>` — docs/meta-only changes (like this one).
 - `chore/<slug>` — tooling, deps, CI.
 - `experiment/<slug>` — research spikes that may never merge.
+- Any of the above gets a `<project>-` prefix on the slug
+  (`feat/jepa-research-scaffold`) when the change is scoped to one
+  `projects/<name>/` or `tools/<name>/`; omit it for cross-cutting
+  changes. Matches the existing `feature-branches` ruleset glob
+  unchanged — see `CONVENTIONS.md`'s 2026-07-30 entry.
 
 ## Branches
 

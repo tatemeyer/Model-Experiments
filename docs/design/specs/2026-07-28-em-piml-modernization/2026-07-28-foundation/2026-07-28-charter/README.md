@@ -3,7 +3,7 @@ title: "Design Charter — em-piml Modernization"
 design: 2026-07-28-em-piml-modernization
 arc: 2026-07-28-foundation
 slice: 2026-07-28-charter
-revision: E
+revision: F
 status: draft
 date: 2026-07-30
 related-arcs: [field-visualization, jax-migration, cloud-compute-ops, device-abstraction]
@@ -458,6 +458,27 @@ depend on JAX or cloud compute, and vice versa. `device-abstraction` is the
 one clear blocking prerequisite: both `jax-migration` and `cloud-compute-ops`
 are individually incomplete without it.
 
+**Sequencing tiers, adopted 2026-07-30** (breaking this Design down into
+per-Arc plans by usage-constraint and development-time profile, at the
+owner's request): Tier 1 — `device-abstraction` and `field-visualization`,
+neither of which introduces any new usage constraint (no new accounts,
+credentials, or cost exposure) and both of which are unblocked today; Tier
+2 — `cloud-compute-ops`, the only Arc with real external usage constraints
+(free-tier quotas, billing-account linkage risk, credential rotation, an
+ongoing maintenance cadence), gated on Tier 1's device layer; Tier 3 —
+`jax-migration`, the largest and least certain Arc (the SOAP/L-BFGS gap,
+§7), also gated on Tier 1. Tier 1's two Arc Charters now exist (see below);
+Tier 2 and 3 remain unwritten by owner choice, to avoid scoping them ahead
+of decisions Tier 1 may still inform (e.g. where device selection actually
+lives).
+
+**Arc Charters created so far** (each is its own Rev-A document, not
+restated here):
+- `device-abstraction`:
+  `docs/design/specs/2026-07-28-em-piml-modernization/2026-07-30-device-abstraction/2026-07-30-charter/README.md`
+- `field-visualization`:
+  `docs/design/specs/2026-07-28-em-piml-modernization/2026-07-30-field-visualization/2026-07-30-charter/README.md`
+
 **Sequencing caveat** (Technical feasibility gate finding, see §15):
 `device-abstraction`'s natural first implementation is PyTorch-idiom
 (`.to(device)` calls, `device=` threaded through tensor-construction call
@@ -564,7 +585,11 @@ See `docs/design/README.md` for the full definition of the Design/Arc/Slice
 hierarchy, the Rev-A → Rev-0 lifecycle, Change Orders, the six review
 lenses, and a glossary.
 
-## 10. Gates — Rev-E
+## 10. Gates — Rev-F
+
+**Unchanged from Rev-E.** Rev-F only records a sequencing decision and
+creates two child Arc Charter documents (§6) — it doesn't touch this
+Charter's own scope or constraint text, so no gate re-check applies.
 
 - [x] Security — cleared in Rev-B against Rev-A (§13). Re-affirmed for
       Rev-E's scope change: `field-visualization`'s new dependencies
@@ -629,11 +654,10 @@ dependencies) before promotion — at the owner's discretion.
   redirected the arc's entire toolkit choice instead, toward
   PyVista/Plotly/matplotlib. Full original text preserved via git history
   (Rev-D) for the audit trail.
-- Confirm `device-abstraction` as its own Arc versus folding it into
-  `foundation` — this Charter recommends a standalone Arc since both
-  `jax-migration` and `cloud-compute-ops` depend on it directly, but it was
-  research-surfaced, not owner-named, and should be confirmed rather than
-  assumed.
+- ~~Confirm `device-abstraction` as its own Arc versus folding it into
+  `foundation`~~ **Resolved 2026-07-30** — confirmed standalone, via the
+  Tier 1/2/3 sequencing breakdown adopted in §6; its own Rev-A Arc Charter
+  now exists.
 - CI-scope decision (§7): fully outside existing CI, or a new
   non-blocking workflow.
 - NSF ACCESS "Explore" tier eligibility for a fully independent (non
@@ -843,3 +867,4 @@ by either of the two options its own "Addressed in" column named.
 | C | 2026-07-29 | License/compliance gate review (7 findings) incorporated: `jaxpi` copy-paste prohibition, provider Terms-of-Service-vs-license distinction (Colab automation-restriction tension named explicitly), on-the-record license check of `jax`/`jaxlib`/`optax`/`equinox`/`diffrax`, tightened unofficial-fork bullet, corrected Rerun's license citation (dual MIT/Apache-2.0), NOTICE-obligation closing note, repo-wide no-LICENSE-file gap tracked as a deferred open item. | Security, License/compliance |
 | D | 2026-07-29 | Four gates reviewed in parallel against Rev-C: Technical feasibility (6 findings), Cost/compute-budget (5 findings, 1 Critical — GCP TRC billing enforcement), Convention-alignment (6 findings, including 5 broken §13/§14 cross-references from Rev-C now fixed), Goal-delivery (5 findings, 1 **Critical**, escalated to §11 as an owner decision, not resolved here). All non-escalated findings incorporated: corrected §1's "entanglement" rationale, corrected `rerun-visualization`'s surface-area claim, softened `jax-migration`'s unconditional replacement language and named SOAP mitigation options, added a PyTorch→JAX parity-verification requirement, added `cloud-compute-ops` workload-fit/phased-rollout and "maintain" (not just "setup") requirements, added GCP billing-alert and Kaggle/Colab quota-monitoring requirements, added the `CONVENTIONS.md` optimizer-default entry to §4's reconciliation, added `tools/<name>` placement requirements and a GPU test-marker requirement, added a Design/Arc Charter PR-template-exemption note, and added a process-scope note on gate-cascade risk. | Security, License/compliance, Technical feasibility, Cost/compute-budget, Convention-alignment (5 of 6 — Goal-delivery open pending owner decision) |
 | E | 2026-07-30 | Owner course-correction (PR #55 comment) redirected the visualization arc away from Rerun.io entirely, following dedicated research into EM-field-capable rendering toolkits (surveyed PyVista, Plotly, matplotlib, K3D, ParaView, Mayavi, VisPy, napari, yt, and the visualization approaches of Meep/gprMax/openEMS). Renamed `rerun-visualization` → `field-visualization`; committed to PyVista (primary, 3D/volumetric) + Plotly (lightweight embeddable interactives) + existing matplotlib/`mx-viz` (2D), replacing Rerun.io entirely. Resolves Rev-D's escalated Goal-delivery Critical finding (§18) directly rather than choosing between the two options §11 offered. Added a third `CONVENTIONS.md` reconciliation paragraph (plotting default, 2026-07-27 entry, §4) proactively rather than waiting for a future gate to catch the omission. Self-checked all six gates against this revision's scope change (§10) — License/Cost/Convention/Technical-feasibility re-affirmed using the same research backing §3, Goal-delivery cleared via the owner's explicit decision — explicitly flagged as a lighter-weight self-check rather than a fresh independent per-gate agent review, with promotion to Rev-0 left as an explicit owner choice. | Security, License/compliance, Technical feasibility, Cost/compute-budget, Convention-alignment, Goal-delivery (6 of 6, self-checked — see §10 reviewer notes) |
+| F | 2026-07-30 | At the owner's request, broke this Design down into per-Arc plans by usage-constraint and development-time profile (§6): Tier 1 (`device-abstraction`, `field-visualization` — no new usage constraints, unblocked today), Tier 2 (`cloud-compute-ops` — real external usage constraints, gated on Tier 1), Tier 3 (`jax-migration` — largest/least certain, gated on Tier 1). Wrote Rev-A Arc Charters for both Tier 1 arcs (own documents, not restated here); Tier 2/3 left unwritten by owner choice. Resolves §11's `device-abstraction`-as-own-Arc open question. No gate re-review performed — this revision only records a sequencing decision and creates child documents, it doesn't change this Charter's own scope/constraint text. | Unchanged from Rev-E (6 of 6, self-checked) |

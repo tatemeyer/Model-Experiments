@@ -1,0 +1,18 @@
+# Literature registry
+
+Every paper this project has evaluated or drawn on, deduped from citations
+scattered across `experiments/`. Check here before re-proposing a paper as
+a "new" lead — if it's already **Tried**, the verdict and notes explain
+why it did or didn't transfer, so a future issue can build on that instead
+of re-deriving it. Add a row (and update verdict) whenever an issue cites
+or tests a new paper — see `experiments/TEMPLATE.md`.
+
+| Paper | arXiv / link | Cited or tried in | Verdict | Notes |
+|---|---|---|---|---|
+| Assran et al., "Self-Supervised Learning from Images with a Joint-Embedding Predictive Architecture" (I-JEPA), CVPR 2023 | [arXiv:2301.08243](https://arxiv.org/abs/2301.08243) | Project motivation (Arc 1) | 📖 Foundational, not yet tested | Establishes the core mechanism this project studies: context/target block masking, EMA target encoder, predictor operating in latent space, no pixel reconstruction, no contrastive negatives. Its own linear-probe evaluation protocol is the template for this project's Slice 1 verification. |
+| Bardes, Ponce, LeCun et al., "V-JEPA 2: Self-Supervised Video Models Enable Understanding, Prediction and Planning" | [arXiv:2506.09985](https://arxiv.org/abs/2506.09985) | Project motivation (Arc 1, Arc 4) | 📖 Foundational, not yet tested | Extends I-JEPA to video (1M hrs internet video + 62 hrs robot interaction), ~80% zero-shot manipulation success via predictor-rollout planning. Not reproducible at this repo's compute budget (see `CONVENTIONS.md` "Compute assumption") — motivates Arc 4's toy-scale planning question instead of a replication attempt. |
+| Meta AI, "V-JEPA 2.1" (Mar 2026 update) | [ai.meta.com/research/vjepa](https://ai.meta.com/research/vjepa/) | Project motivation (Arc 1) | 📖 Foundational, not yet tested | Sharpens V-JEPA 2's recipe for more temporally consistent dense features. No arXiv paper found at seeding time (blog/model-card only) — revisit if a formal writeup appears. |
+| "A Generalization Theory for JEPA-Based World Models" | [arXiv:2606.27014](https://arxiv.org/abs/2606.27014) | Project motivation (Arc 1) | 📖 Foundational, not yet tested | Theoretical account of when/why JEPA-style latent prediction generalizes — relevant to Arc 1's collapse-avoidance question (collapse is the degenerate case the theory presumably excludes) and Arc 2's latent-vs-pixel question. Not yet read in depth against this project's specific toy setup. |
+| "MoP-JEPA: Hard-Assigned Predictor Mixtures for Stochastic JEPA World Models" | [arXiv:2607.05238](https://arxiv.org/abs/2607.05238) | Project motivation (Arc 3) | 📖 Foundational, not yet tested | Mixture-of-predictors for multimodal/stochastic futures — direct motivation for Arc 3's fork-in-the-road toy environment. Out of scope until Arc 1/2 infrastructure exists. |
+
+**Legend:** ✅ tried and worked · ⚠️ tried, partial/modest win · ❌ tried, no effect · 🔻 tried, actively worse than doing nothing · 📖 cited as theory/motivation, not itself a tested fix.

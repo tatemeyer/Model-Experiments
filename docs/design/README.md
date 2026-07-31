@@ -37,6 +37,15 @@ docs/design/specs/<date>-<design-slug>/<date>-<arc-slug>/<date>-<slice-slug>/
   roughly like a single Issue/PR. Slice documents are where implementation
   detail (file paths, function signatures, test plans) actually belongs —
   Design- and Arc-level documents stay at vision/scope level.
+- **Task** and **Feature** — finer-grained than a Slice, but deliberately
+  *not* additional document levels. A Task is one commit-sized
+  implementation step inside a Slice's own PR (tracked as a checklist item
+  in the Slice document's sequencing section, or in the Issue/PR body — not
+  a new file); a Feature is one atomic, independently-verifiable capability
+  a Task adds, and maps 1:1 onto a test function CI already runs. Adding
+  persisted documents at this granularity would be exactly the scaffolding
+  root `CLAUDE.md`'s "Working rules" section warns against, for a unit of
+  work a commit and a `pytest` test already track perfectly well.
 
 Every document's date prefix is the date *that specific document* was
 created, not the date of the Design/Arc it lives under.
@@ -134,6 +143,8 @@ lives entirely inside `docs/design/specs/`, not in Issues.
 | Design | Outcome-level umbrella; decomposes into Arcs. |
 | Arc | One coherent initiative within a Design; decomposes into Slices. |
 | Slice | A concrete, Issue/PR-sized unit of implementable work. |
+| Task | A commit-sized implementation step inside a Slice's PR; a checklist item, not a document. |
+| Feature | An atomic, independently-verifiable capability a Task adds; maps to a test function, not a document. |
 | Revision | A lettered draft (Rev-A, Rev-B, ...) of a document, in review. |
 | Rev-0 | The frozen, final revision — read-only by convention after this point. |
 | Gate | One of the six review lenses a revision must clear before advancing. |
