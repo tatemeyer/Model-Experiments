@@ -5,4 +5,4 @@ destination = ".data/example-smoke-test"
 
 [source]
 kind = "generator"
-command = ["python3", "tools/datasets/registry/generators/example_smoke_test.py"]
+command = ["python", "tools/datasets/registry/generators/example_smoke_test.py"]

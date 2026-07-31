@@ -79,7 +79,14 @@ def _run_generator(spec: DatasetSpec) -> None:
     if not spec.generator:
         raise ValueError(f"Dataset '{spec.name}' has kind=generator but no command set")
     spec.dest_path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(spec.generator, cwd=registry.repo_root(), check=True)
+    # Registry entries write a portable "python" as the interpreter token; substitute the actual
+    # interpreter running this CLI (sys.executable) rather than letting the OS resolve a bare
+    # "python" from PATH. On Windows, that resolution consults the "App Paths" registry key
+    # before PATH order, silently picking a system-wide Python install instead of the uv-managed
+    # venv one mx-data itself is running under -- the generator then fails to import the very
+    # workspace packages (em_piml, jepa, ...) the venv exists to provide.
+    command = [sys.executable if token == "python" else token for token in spec.generator]
+    subprocess.run(command, cwd=registry.repo_root(), check=True)
 
 
 def cmd_list(_args: argparse.Namespace) -> int:

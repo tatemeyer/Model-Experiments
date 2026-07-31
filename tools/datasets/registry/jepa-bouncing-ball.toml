@@ -1,0 +1,8 @@
+name = "jepa-bouncing-ball"
+description = "Seeded bouncing-ball grayscale video with exact closed-form ground-truth position/velocity -- toy environment for projects/jepa."
+license = "N/A (synthetically generated, closed-form)"
+destination = ".data/jepa-bouncing-ball"
+
+[source]
+kind = "generator"
+command = ["python", "tools/datasets/registry/generators/jepa_bouncing_ball.py"]
