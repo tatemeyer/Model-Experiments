@@ -131,6 +131,7 @@ spectral bias, and what fixes it?
 |---|---|---|---|
 | #22 | Does a two-mode superposition break the baseline, and does Fourier embedding fix it? | ⚠️ breaks it, Fourier partially helps | `experiments/two-mode-spectral-bias/022-two-mode-superposition.md` |
 | #25 | Does raising num_bands close the gap? | ❌ helps slightly at 4, destabilizes past it | `experiments/two-mode-spectral-bias/025-num-bands-sweep.md` |
+| #39 | Does Random Weight Factorization close the gap, alone and combined with Fourier embeddings? | ⚠️ small mixed effect (helps alone and with num_bands=4, slightly hurts with num_bands=2), doesn't close it | `experiments/two-mode-spectral-bias/039-random-weight-factorization.md` |
 
 **Thread: `long-horizon-collapse/`** — training/evaluating over multiple
 periods collapses to a degenerate near-constant output; what fixes it?
@@ -181,7 +182,16 @@ stale.
 - Network capacity was never widened specifically for this target the
   way `010-network-capacity.md` did for the single-mode case — untried.
   Queued as **issue #41** (PirateNets-style adaptive-residual
-  architecture) and **issue #39** (Random Weight Factorization).
+  architecture).
+- ~~Does Random Weight Factorization (Wang et al., arXiv:2210.01274)
+  close the gap, alone and combined with the existing Fourier
+  embeddings?~~ Tried in issue #39: small, mixed effect (real but modest
+  improvement alone and combined with `num_bands=4`; slightly *worse*
+  combined with `num_bands=2`), doesn't close it. Pointwise-diagnosed as
+  the same underlying mechanism as every prior fix in this thread: RWF
+  reparameterizes the weights, not the input representation, so it
+  never touches the missing-`8*pi`-basis-frequency gap `022-...md`
+  identified — see `039-random-weight-factorization.md`.
 - NTK-based adaptive loss reweighting (Wang/Teng/Perdikaris) was flagged
   here but never actually tried against *this* target — only against
   the long-horizon collapse (`034-ntk-reweighted-long-horizon.md`,

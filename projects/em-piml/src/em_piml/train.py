@@ -13,6 +13,8 @@ from em_piml.model import (
     FourierCavityPINN,
     NeuSACavityPINN,
     PseudoSequenceCavityPINN,
+    RWFCavityPINN,
+    RWFFourierCavityPINN,
     _pseudo_sequence,
     _rk4_integrate,
 )
@@ -457,6 +459,73 @@ def train_fourier_cavity_soap_two_mode(
     model = FourierCavityPINN(hidden=32, num_layers=3, num_bands=num_bands)
     return _train_pinn_soap(
         model, steps, n_collocation, n_boundary, n_initial, lr, field_fn=analytical_field_two_mode
+    )
+
+
+def train_cavity_rwf_two_mode(
+    steps: int = 4000,
+    seed: int = 0,
+    n_collocation: int = 200,
+    n_boundary: int = 64,
+    n_initial: int = 64,
+    lr: float = 3e-3,
+) -> RWFCavityPINN:
+    # issue #39: same shipped defaults as train_cavity_two_mode (issue #22) -- the only variable is
+    # Random Weight Factorization (RWFLinear, arXiv:2210.01274) applied to every linear layer,
+    # tested here with no Fourier embedding at all ("RWF alone").
+    torch.manual_seed(seed)
+    model = RWFCavityPINN(hidden=32, num_layers=3)
+    return _train_pinn_adam(
+        model, steps, n_collocation, n_boundary, n_initial, lr, field_fn=analytical_field_two_mode
+    )
+
+
+def train_fourier_cavity_rwf_two_mode(
+    steps: int = 4000,
+    seed: int = 0,
+    n_collocation: int = 200,
+    n_boundary: int = 64,
+    n_initial: int = 64,
+    lr: float = 3e-3,
+    num_bands: int = 2,
+) -> RWFFourierCavityPINN:
+    # issue #39: same shipped defaults as train_fourier_cavity_two_mode (issue #22, num_bands=2
+    # default) -- RWF combined with the existing Fourier embedding; weight parameterization is the
+    # only variable relative to that function.
+    torch.manual_seed(seed)
+    model = RWFFourierCavityPINN(hidden=32, num_layers=3, num_bands=num_bands)
+    return _train_pinn_adam(
+        model, steps, n_collocation, n_boundary, n_initial, lr, field_fn=analytical_field_two_mode
+    )
+
+
+def train_fourier_cavity_rwf_lbfgs_two_mode(
+    seed: int = 0,
+    num_bands: int = 4,
+    outer_steps: int = 50,
+    max_iter: int = 50,
+    n_collocation: int = 2000,
+    n_boundary: int = 400,
+    n_initial: int = 400,
+    points_seed: int | None = None,
+) -> RWFFourierCavityPINN:
+    # issue #39: same shipped recipe as train_fourier_cavity_lbfgs_two_mode (issue #25's
+    # num_bands=4 L-BFGS/64-hidden fix for plain Adam's num_bands>=4 instability on this target) --
+    # RWF is the only additional variable, applied to the same 64-hidden body.
+    torch.manual_seed(seed)
+    model = RWFFourierCavityPINN(hidden=64, num_layers=3, num_bands=num_bands)
+    points_generator = None
+    if points_seed is not None:
+        points_generator = torch.Generator().manual_seed(points_seed)
+    return _train_pinn_lbfgs(
+        model,
+        outer_steps,
+        max_iter,
+        n_collocation,
+        n_boundary,
+        n_initial,
+        points_generator=points_generator,
+        field_fn=analytical_field_two_mode,
     )
 
 
