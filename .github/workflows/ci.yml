@@ -19,7 +19,7 @@ jobs:
           enable-cache: true
 
       - name: Sync workspace
-        run: uv sync --all-packages
+        run: uv sync --all-packages --all-extras
 
       - name: Lint
         run: uvx ruff check .

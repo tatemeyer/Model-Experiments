@@ -202,6 +202,35 @@ contracts that currently don't read from each other — a natural
 follow-up is teaching `mx-viz` to plot directly from `results.csv`
 rows instead of requiring its own JSON export per sweep.
 
+## 2026-07-31 — Plotting: PyVista + Plotly as an optional `mx-viz[3d]` extra
+
+The `field-visualization` Arc
+(`docs/design/specs/2026-07-28-em-piml-modernization/2026-07-30-field-visualization/2026-07-30-charter/README.md`)
+commits to PyVista for 3D/volumetric field rendering and Plotly for
+lightweight embeddable interactives — additive to, not a replacement
+for, the 2026-07-27 matplotlib entry above, which remains the default
+for the static 2D output every current caller still produces. Both ship
+together as one `[project.optional-dependencies]` extras group,
+`tools/viz/pyproject.toml`'s `3d` (`mx-viz[3d]`) — this repo's first use
+of PEP 735 extras, distinct from the existing `[dependency-groups] dev`
+mechanism — kept optional specifically to keep VTK's ~150-250MB
+footprint out of every workspace member's default install; no project's
+own `pyproject.toml` should depend on `mx-viz[3d]` by default (bare
+`mx-viz` only) unless that project actually renders 3D/interactive
+output itself.
+
+License check (on the record per the Arc Charter §3/§12, not re-derived
+here): PyVista (MIT), Plotly (MIT), VTK (BSD-3-Clause) — all permissive,
+cleared. Optional transitive stacks pulled in by *specific* features
+(`export_html`'s `trame`/`trame-vtk`/vtk.js, video export's bundled
+FFmpeg build) are a separate check owned by the Slice that actually adds
+that feature, not this entry.
+
+`.github/workflows/ci.yml`'s sync step uses `uv sync --all-packages
+--all-extras` so the `3d` extra (and any future extras group) is
+reachable in CI — see issue #58 for the cold-cache wall-clock budget
+(90s over the pre-extras baseline) this was measured against.
+
 ## 2026-07-30 — Testing: `gpu` marker for hardware-gated tests
 
 The `device-abstraction` Arc (`docs/design/specs/2026-07-28-em-piml-modernization/`)
