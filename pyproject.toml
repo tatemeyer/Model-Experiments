@@ -12,5 +12,6 @@ select = ["E", "F", "I", "UP"]
 testpaths = ["tools", "projects"]
 markers = [
     "slow: marks tests that train a model and take a while (deselected by default; run explicitly with `uv run pytest -m slow` or `uv run pytest -o addopts=''` for the full suite)",
+    "gpu: marks tests that require actual GPU hardware (deselected by default on every runner; run explicitly on a machine with a GPU with `uv run pytest -m gpu` or `uv run pytest -o addopts=''` for the full suite)",
 ]
-addopts = "-m 'not slow'"
+addopts = "-m 'not slow and not gpu'"
