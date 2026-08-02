@@ -44,6 +44,80 @@ class FourierCavityPINN(nn.Module):
         return self.net(embedded)
 
 
+class RWFLinear(nn.Module):
+    """Random Weight Factorization (Wang, Wang, Seidman, Perdikaris, "Random Weight Factorization
+    Improves the Training of Continuous Neural Representations," arXiv:2210.01274) -- a drop-in
+    replacement for nn.Linear that reparameterizes the weight matrix W (out_features, in_features)
+    as W = diag(s) @ V: a per-output-neuron scalar factor s and a matrix V of the same shape as W,
+    both trained directly instead of W itself. This changes the effective per-row gradient scaling
+    during training (the paper's claimed mechanism for improving loss-landscape conditioning /
+    mitigating spectral bias) -- a reparameterization of the weights themselves, independent of and
+    complementary to any input embedding (issue #39, vs. every prior two-mode-spectral-bias fix,
+    which changed the input embedding instead).
+
+    Initialization (paper section 3.1): draw W, bias from nn.Linear's own default init, then
+    factorize row-wise: s_j = exp(mu + sigma * z_j), z_j ~ N(0, 1), V = W / s (broadcast per row).
+    This makes the initial effective weight diag(s) @ V equal to W exactly -- only the training
+    dynamics differ from a standard nn.Linear, not the initial forward pass. mu=0.5/sigma=0.1
+    (default) is the paper's own Navier-Stokes setting (Table 4, Appendix D) -- the nearest PDE
+    task to this project's wave equation among the paper's own ablations (it has no
+    Helmholtz/wave-equation benchmark of its own); the general-purpose default the paper states
+    elsewhere is mu=1.0/sigma=0.1. Untuned for this project's specific problem either way -- see
+    the issue #39 experiment write-up.
+    """
+
+    def __init__(self, in_features: int, out_features: int, mu: float = 0.5, sigma: float = 0.1):
+        super().__init__()
+        base = nn.Linear(in_features, out_features)
+        s_init = torch.exp(mu + sigma * torch.randn(out_features, 1))
+        self.s = nn.Parameter(s_init)
+        self.v = nn.Parameter(base.weight.data / s_init)
+        self.bias = nn.Parameter(base.bias.data)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        weight = self.s * self.v
+        return nn.functional.linear(x, weight, self.bias)
+
+
+def _rwf_mlp(dims: list[int]) -> nn.Sequential:
+    modules: list[nn.Module] = []
+    for i in range(len(dims) - 1):
+        modules.append(RWFLinear(dims[i], dims[i + 1]))
+        if i < len(dims) - 2:
+            modules.append(nn.Tanh())
+    return nn.Sequential(*modules)
+
+
+class RWFCavityPINN(nn.Module):
+    """CavityPINN with Random Weight Factorization (see RWFLinear) applied to every linear layer of
+    the MLP body -- no input embedding, so this isolates RWF's effect from Fourier features
+    entirely (issue #39's "RWF alone" variant). Same MLP body shape as CavityPINN otherwise."""
+
+    def __init__(self, hidden: int = 32, num_layers: int = 3):
+        super().__init__()
+        self.net = _rwf_mlp([2] + [hidden] * num_layers + [1])
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        return self.net(torch.cat([x, t], dim=-1))
+
+
+class RWFFourierCavityPINN(nn.Module):
+    """FourierCavityPINN with Random Weight Factorization (see RWFLinear) applied to every linear
+    layer of the MLP body -- tests RWF combined with the existing Fourier embedding (issue #39),
+    since the two mechanisms (input embedding vs. weight reparameterization) are independent per
+    Wang et al. Same embedding + MLP body shape as FourierCavityPINN otherwise."""
+
+    def __init__(self, hidden: int = 32, num_layers: int = 3, num_bands: int = 4):
+        super().__init__()
+        self.embedding = FourierFeatureEmbedding(num_bands=num_bands)
+        in_dim = 2 * self.embedding.out_dim_per_scalar
+        self.net = _rwf_mlp([in_dim] + [hidden] * num_layers + [1])
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        embedded = self.embedding(x / L, t / PERIOD)
+        return self.net(embedded)
+
+
 class Wavelet(nn.Module):
     """omega1*sin(x) + omega2*cos(x), learnable omega1/omega2 (Zhao et al., "PINNsFormer", ICLR
     2024, arXiv:2307.11833) — anticipates a Fourier decomposition of the target signal. The
