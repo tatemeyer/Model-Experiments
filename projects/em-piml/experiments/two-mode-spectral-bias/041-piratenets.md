@@ -65,17 +65,21 @@ reparameterization (issue #39), but a different, deeper mechanism than
 RWF and still short of what the existing (much cheaper) Fourier
 embedding already achieves.
 
-**Supplementary, not the shipped comparison — partial paper-scale
-numbers, gathered as a side data point while the reduced-budget sweep
-above ran**: `num_blocks=4`, `steps=4000` reached 0.7151 (seed 0) and
-0.7195 (seed 1) before this write-up's time budget moved on (2 of 4
-seeds only — not a complete, decision-grade comparison). Both are
-better than the shipped reduced-budget numbers, consistent with more
-capacity/training genuinely helping somewhat, and edge closer to (but,
-on these two seeds, still don't clearly beat) the Fourier-embedding
-baselines' range. Whether the full 4-seed paper-scale run would
-actually close the gap is a real open question this issue's own runtime
-budget didn't allow settling — see leads below.
+**Supplementary, not the shipped comparison, but now conclusive: the
+full paper-scale sweep finished after the shipped (reduced-budget)
+result was already written up, running in the background while the
+rest of this issue's work continued.** `num_blocks=4`, `steps=4000`,
+all 4 seeds: 0.7151, 0.7156, 0.7195, 0.7231 (mean 0.7183, stdev 0.0032
+— tighter than the reduced-budget config's spread too). Better than the
+shipped reduced-budget numbers, as expected from more capacity/training,
+and closer to the Fourier-embedding baselines' range than the
+reduced-budget config gets — but **still does not beat either one**:
+the paper-scale range's best seed (0.7151) is still worse than
+`num_bands=4`'s best (0.7023) and sits entirely above `num_bands=2`'s
+whole range (0.6995-0.7063). This settles what was an open question in
+an earlier draft of this write-up (see below): even at the paper's own
+literal depth/step budget, PirateNets does not close the two-mode gap
+or beat the project's existing, far cheaper Fourier-embedding fixes.
 
 **Pointwise check (same method as `022-...md`/`039-...md`) at seed 0's
 shipped-config model confirms the same failure mechanism as every prior
@@ -105,20 +109,21 @@ reproduces a bit-identical `state_dict` across two calls to
 the full sweep).
 
 **Leads for whoever picks this up next:**
-1. Whether the full paper-scale config (`num_blocks=4`, `steps=4000`)
-   actually beats the Fourier-embedding baselines is genuinely open —
-   only 2 of 4 seeds were gathered (0.7151, 0.7195), both better than
-   the shipped reduced-budget numbers but not conclusively past
-   0.6995-0.7128. Finishing that 4-seed run (~50 min total at this
-   sandbox's per-seed cost) would settle it.
+1. ~~Whether the full paper-scale config (`num_blocks=4`, `steps=4000`)
+   actually beats the Fourier-embedding baselines~~ — settled above:
+   no, not even at the paper's own literal depth/step budget.
 2. `fourier_scale` is untuned (borrowed default, no wave-equation
    precedent in the paper) — per the pointwise diagnosis above, a
    larger value (raising the typical sampled frequency magnitude toward
    the `n=8` mode's `~8*pi` need) is a concrete, testable lever neither
-   this issue nor RWF's analogous `mu`/`sigma` sweep touched.
+   this issue nor RWF's analogous `mu`/`sigma` sweep touched, and — now
+   that more depth/budget alone is confirmed insufficient — the more
+   promising remaining lever specifically for this architecture.
 3. Combining PirateNets' depth mechanism with the project's own
    deterministic Fourier embedding (guaranteeing `8*pi` basis coverage,
    rather than relying on random-frequency luck) is architecturally
    straightforward and untried — would isolate "does adaptive depth
    help *given* adequate frequency coverage" from "does PirateNets'
-   own embedding provide adequate coverage."
+   own embedding provide adequate coverage." Given lead 1 above, this is
+   now the more likely-to-matter structural change of the two remaining
+   leads.

@@ -200,9 +200,12 @@ stale.
   `steps=1000` — the paper-scale config measured 767-796s/seed, over an
   order of magnitude past this project's runtime convention). Pointwise-
   diagnosed as the same missing-`n=8`-mode failure as every prior fix in
-  this thread. Partial paper-scale numbers (2 of 4 seeds, 0.7151/0.7195)
-  trend better but didn't settle whether the full config would actually
-  close the gap — see `041-piratenets.md` for the full write-up and
+  this thread. The full paper-scale config (`num_blocks=4`,
+  `steps=4000`, all 4 seeds) finished later and settled the question the
+  reduced-budget run left open: 0.7151-0.7231, better than the
+  reduced-budget numbers but still short of both Fourier-embedding
+  baselines' ranges — more depth/budget alone doesn't close the gap
+  either. See `041-piratenets.md` for the full write-up and remaining
   leads (untuned `fourier_scale`; combining PirateNets' depth mechanism
   with this project's own deterministic Fourier embedding instead of
   PirateNets' own random one).
