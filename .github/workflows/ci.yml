@@ -47,4 +47,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.after }}
 
       - name: Test (slow)
-        run: xvfb-run -a uv run pytest -m 'slow and not gpu' ${{ steps.scope.outputs.paths }}
+        # Path-scoping (issue #71) can legitimately scope this to a project with zero slow-marked
+        # tests (e.g. a PR touching only projects/jepa before jepa had any @pytest.mark.slow test)
+        # -- pytest's own "no tests collected" exit code (5) must not fail the job in that case.
+        run: xvfb-run -a uv run pytest -m 'slow and not gpu' ${{ steps.scope.outputs.paths }} || [ $? = 5 ]
