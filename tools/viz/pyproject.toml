@@ -5,6 +5,13 @@ description = "Repo-wide plotting toolkit for visualizing research experiments a
 requires-python = ">=3.11"
 dependencies = ["matplotlib>=3.8", "numpy>=1.26"]
 
+[project.optional-dependencies]
+# field-visualization Arc, Slice 1 (issue #58): PyVista + Plotly, together -- both are needed by
+# near-term Slices (field-render-core, plotly-interactive) and no reason was found to split them.
+# Optional: only reachable in CI via `uv sync --all-extras` (ci.yml), never part of the default
+# `uv sync --all-packages` footprint any other workspace member picks up transitively.
+3d = ["pyvista>=0.45", "plotly>=5.24"]
+
 [project.scripts]
 mx-viz = "mx_viz.cli:main"
 

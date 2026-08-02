@@ -19,13 +19,24 @@ jobs:
           enable-cache: true
 
       - name: Sync workspace
-        run: uv sync --all-packages
+        run: uv sync --all-packages --all-extras
+
+      # PyVista/VTK's off-screen renderer still needs a real OpenGL context -- ubuntu-latest's
+      # base image has neither a GPU nor Mesa's software (llvmpipe) OpenGL driver installed, so
+      # vtkRenderingOpenGL2 segfaults on first render() without these (issue #58: the stock-wheel,
+      # "no Xvfb/OSMesa build needed" research claim didn't hold up against this actual runner).
+      # xvfb-run below wraps both test steps in a virtual X server so vtkRenderingOpenGL2 has a
+      # display to attach to.
+      - name: Install headless rendering system packages (PyVista/VTK off-screen)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgl1 libglx-mesa0 libxrender1 libxext6 xvfb
 
       - name: Lint
         run: uvx ruff check .
 
       - name: Test (fast)
-        run: uv run pytest
+        run: xvfb-run -a uv run pytest
 
       - name: Determine slow-test scope
         id: scope
@@ -36,4 +47,4 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.after }}
 
       - name: Test (slow)
-        run: uv run pytest -m 'slow and not gpu' ${{ steps.scope.outputs.paths }}
+        run: xvfb-run -a uv run pytest -m 'slow and not gpu' ${{ steps.scope.outputs.paths }}
