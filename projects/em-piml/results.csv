@@ -146,3 +146,9 @@ issue,experiment_slug,variant,seed,metric,value,params,date
 40,040-sobol-sampling,sobol_4000,102,relative_l2,0.0315,"{""n_collocation"":4000,""hidden"":64,""sampling"":""sobol""}",2026-08-02
 40,040-sobol-sampling,sobol_4000,103,relative_l2,0.0301,"{""n_collocation"":4000,""hidden"":64,""sampling"":""sobol""}",2026-08-02
 40,040-sobol-sampling,sobol_4000,104,relative_l2,0.0223,"{""n_collocation"":4000,""hidden"":64,""sampling"":""sobol""}",2026-08-02
+41,041-piratenets,piratenets_reduced_budget,0,relative_l2,0.7407,"{""num_blocks"":2,""steps"":1000,""fourier_scale"":1.0,""hidden"":64}",2026-08-02
+41,041-piratenets,piratenets_reduced_budget,1,relative_l2,0.7278,"{""num_blocks"":2,""steps"":1000,""fourier_scale"":1.0,""hidden"":64}",2026-08-02
+41,041-piratenets,piratenets_reduced_budget,2,relative_l2,0.7288,"{""num_blocks"":2,""steps"":1000,""fourier_scale"":1.0,""hidden"":64}",2026-08-02
+41,041-piratenets,piratenets_reduced_budget,7,relative_l2,0.7338,"{""num_blocks"":2,""steps"":1000,""fourier_scale"":1.0,""hidden"":64}",2026-08-02
+41,041-piratenets,piratenets_paper_scale_partial,0,relative_l2,0.7151,"{""num_blocks"":4,""steps"":4000,""fourier_scale"":1.0,""hidden"":64,""note"":""only 2 of 4 seeds completed""}",2026-08-02
+41,041-piratenets,piratenets_paper_scale_partial,1,relative_l2,0.7195,"{""num_blocks"":4,""steps"":4000,""fourier_scale"":1.0,""hidden"":64,""note"":""only 2 of 4 seeds completed""}",2026-08-02
