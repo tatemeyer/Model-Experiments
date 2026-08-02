@@ -265,8 +265,41 @@ new ones:
   orthogonal by design. Don't build a second, project-keyed worktree
   layout. Caveat worth remembering: each worktree needs its own `uv sync
   --all-packages` (a separate `.venv`, not shared across worktrees).
-- **CI path-scoping** (running only a touched project's slow tests,
-  rather than the whole workspace's, on every PR) is a good idea in
-  principle but the exact mechanism needs its own focused design pass
-  rather than a rushed edit to the `verify` required check — filed as
-  **issue #71** rather than implemented here.
+- ~~**CI path-scoping**~~ — filed as issue #71, superseded by the
+  2026-07-31 entry below.
+
+## 2026-07-31 — CI: slow-test step scoped to touched projects/tools
+
+Implements issue #71. `.github/workflows/ci.yml`'s `verify` job stays one
+required check (job name unchanged, per `.github/SETUP.md`'s Rulesets
+section) and Lint/`Test (fast)` stay workspace-wide — only `Test (slow)`
+is scoped. A new `Determine slow-test scope` step
+(`.github/scripts/slow_test_scope.sh`) diffs the PR's base/head SHAs (or
+`before`/`after` on a push to `main`), and:
+
+- If every changed file lives under `projects/<name>/` or
+  `tools/<name>/`, runs `uv run pytest -m 'slow and not gpu'` scoped to
+  just those top-level directories (e.g. a `projects/em-piml/**`-only PR
+  runs only `em-piml`'s slow tests).
+- Otherwise — any root-level/shared file changed (`pyproject.toml`,
+  `uv.lock`, `.github/workflows/ci.yml` itself, docs, etc.), or the
+  base/head SHA can't be resolved — falls back to running every
+  project's slow tests, the safe default.
+
+Deliberately *not* an `on.pull_request.paths` trigger filter: a required
+check that never runs for a non-matching PR blocks merge forever ("waiting
+for status"). The scoping happens inside the always-running `verify` job
+instead. `actions/checkout` now uses `fetch-depth: 0` so both diff
+endpoints are resolvable locally — cheap at this repo's current size.
+
+Verification note: GitHub resolves a `pull_request`-triggered workflow's
+own file changes against that same PR's subsequent runs, but a *second*,
+independently-branched PR only sees a workflow change once it's on
+`main` — so the "scoped to one project" branch of this logic can't be
+exercised live by a PR that also modifies `ci.yml` itself (this one
+necessarily does, which is exactly why it takes the fallback path). Verified via local dry-run of the script against real and synthetic
+file-change lists (all three branches: single-project, multi-project, and
+root-file-triggers-fallback) plus a direct `uv run pytest --collect-only`
+scoped to `projects/em-piml` confirming only its 19 slow tests are
+selected. Live end-to-end confirmation of the scoped path is the first
+project-only PR opened after this merges.
