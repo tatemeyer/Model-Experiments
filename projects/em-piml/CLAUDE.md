@@ -133,6 +133,7 @@ spectral bias, and what fixes it?
 | #22 | Does a two-mode superposition break the baseline, and does Fourier embedding fix it? | ⚠️ breaks it, Fourier partially helps | `experiments/two-mode-spectral-bias/022-two-mode-superposition.md` |
 | #25 | Does raising num_bands close the gap? | ❌ helps slightly at 4, destabilizes past it | `experiments/two-mode-spectral-bias/025-num-bands-sweep.md` |
 | #39 | Does Random Weight Factorization close the gap, alone and combined with Fourier embeddings? | ⚠️ small mixed effect (helps alone and with num_bands=4, slightly hurts with num_bands=2), doesn't close it | `experiments/two-mode-spectral-bias/039-random-weight-factorization.md` |
+| #41 | Does a PirateNets-style adaptive-residual architecture close the gap? | ⚠️ real improvement over plain baseline, but doesn't beat the existing Fourier-embedding fixes (at a reduced, CI-budget-scaled config) | `experiments/two-mode-spectral-bias/041-piratenets.md` |
 
 **Thread: `long-horizon-collapse/`** — training/evaluating over multiple
 periods collapses to a degenerate near-constant output; what fixes it?
@@ -189,10 +190,25 @@ stale.
   eventually help.
 
 **two-mode-spectral-bias:**
-- Network capacity was never widened specifically for this target the
-  way `010-network-capacity.md` did for the single-mode case — untried.
-  Queued as **issue #41** (PirateNets-style adaptive-residual
-  architecture).
+- ~~Network capacity was never widened specifically for this target the
+  way `010-network-capacity.md` did for the single-mode case; does a
+  PirateNets-style adaptive-residual architecture (a different depth
+  mechanism, not just a wider plain MLP) close the gap?~~ Tried in
+  issue #41: real improvement over the plain baseline (0.7278-0.7407 vs.
+  0.7699-0.7947) but doesn't beat either existing Fourier-embedding fix
+  (0.6995-0.7128), at a CI-budget-reduced config (`num_blocks=2`,
+  `steps=1000` — the paper-scale config measured 767-796s/seed, over an
+  order of magnitude past this project's runtime convention). Pointwise-
+  diagnosed as the same missing-`n=8`-mode failure as every prior fix in
+  this thread. The full paper-scale config (`num_blocks=4`,
+  `steps=4000`, all 4 seeds) finished later and settled the question the
+  reduced-budget run left open: 0.7151-0.7231, better than the
+  reduced-budget numbers but still short of both Fourier-embedding
+  baselines' ranges — more depth/budget alone doesn't close the gap
+  either. See `041-piratenets.md` for the full write-up and remaining
+  leads (untuned `fourier_scale`; combining PirateNets' depth mechanism
+  with this project's own deterministic Fourier embedding instead of
+  PirateNets' own random one).
 - ~~Does Random Weight Factorization (Wang et al., arXiv:2210.01274)
   close the gap, alone and combined with the existing Fourier
   embeddings?~~ Tried in issue #39: small, mixed effect (real but modest

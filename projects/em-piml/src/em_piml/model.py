@@ -118,6 +118,77 @@ class RWFFourierCavityPINN(nn.Module):
         return self.net(embedded)
 
 
+class PirateNetBlock(nn.Module):
+    """One adaptive-residual block (Wang, Li, Chen, Perdikaris, "PirateNets: Physics-Informed
+    Deep Learning with Residual Adaptive Networks," JMLR 2024, arXiv:2402.00326, eq. 4.1-4.6):
+    two gated dense transforms (using the shared U/V gates computed once from the random Fourier
+    embedding, see PirateNetCavityPINN), then a learnable scalar alpha blends the block's own
+    output with its input -- alpha initialized to 0 makes the block an exact identity map at
+    construction time (see PirateNetCavityPINN's docstring for why this matters)."""
+
+    def __init__(self, hidden: int):
+        super().__init__()
+        self.dense1 = nn.Linear(hidden, hidden)
+        self.dense2 = nn.Linear(hidden, hidden)
+        self.dense3 = nn.Linear(hidden, hidden)
+        self.activation = nn.Tanh()
+        self.alpha = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x: torch.Tensor, u: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        f = self.activation(self.dense1(x))
+        z1 = f * u + (1 - f) * v
+        g = self.activation(self.dense2(z1))
+        z2 = g * u + (1 - g) * v
+        h = self.activation(self.dense3(z2))
+        return self.alpha * h + (1 - self.alpha) * x
+
+
+class PirateNetCavityPINN(nn.Module):
+    """PirateNets (arXiv:2402.00326) for this project's two-mode target (issue #41): a *different*
+    depth/capacity mechanism than issue #10's plain width increase, designed specifically so a
+    stack of residual blocks starts as an effectively shallow network and progressively deepens
+    during training, rather than needing careful initialization to train stably at depth at all.
+
+    The paper's own input embedding -- fixed (non-trained) random Fourier features Phi(x) =
+    [cos(Bx); sin(Bx)], B ~ N(0, fourier_scale^2) -- is part of the architecture's definition, not
+    a swappable choice: U and V (computed once from Phi(x)) are the gates every block reuses, and
+    at init (every block's alpha=0) the whole network collapses to a linear readout of Phi(x)
+    alone (eq. 4.8: u_theta(x) = W^(L+1) Phi(x)) -- this is the "effectively shallow at init"
+    property the paper's stability claim depends on, so it's implemented as specified rather than
+    substituted with this project's existing (deterministic, power-of-two-frequency)
+    FourierFeatureEmbedding. fourier_scale=1.0 is an untuned default -- the paper reports no
+    wave-equation benchmark of its own to inherit a value from (see the issue #41 experiment
+    write-up).
+    """
+
+    def __init__(self, hidden: int = 64, num_blocks: int = 4, fourier_scale: float = 1.0):
+        super().__init__()
+        num_freqs = hidden // 2
+        if 2 * num_freqs != hidden:
+            raise ValueError(f"hidden={hidden} must be even (2 * num_freqs)")
+        # B is fixed/random, not trained (paper Sec. 4) -- a buffer, not a Parameter.
+        self.register_buffer("B", torch.randn(num_freqs, 2) * fourier_scale)
+        self.dense_u = nn.Linear(hidden, hidden)
+        self.dense_v = nn.Linear(hidden, hidden)
+        self.activation = nn.Tanh()
+        self.blocks = nn.ModuleList([PirateNetBlock(hidden) for _ in range(num_blocks)])
+        self.out = nn.Linear(hidden, 1)
+
+    def _embed(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        xt = torch.cat([x / L, t / PERIOD], dim=-1)
+        proj = xt @ self.B.T
+        return torch.cat([torch.cos(proj), torch.sin(proj)], dim=-1)
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        phi = self._embed(x, t)
+        u = self.activation(self.dense_u(phi))
+        v = self.activation(self.dense_v(phi))
+        h = phi
+        for block in self.blocks:
+            h = block(h, u, v)
+        return self.out(h)
+
+
 class Wavelet(nn.Module):
     """omega1*sin(x) + omega2*cos(x), learnable omega1/omega2 (Zhao et al., "PINNsFormer", ICLR
     2024, arXiv:2307.11833) — anticipates a Fourier decomposition of the target signal. The

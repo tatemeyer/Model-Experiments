@@ -14,6 +14,7 @@ from em_piml.model import (
     CavityPINN,
     FourierCavityPINN,
     NeuSACavityPINN,
+    PirateNetCavityPINN,
     PseudoSequenceCavityPINN,
     RWFCavityPINN,
     RWFFourierCavityPINN,
@@ -621,6 +622,29 @@ def train_fourier_cavity_rwf_lbfgs_two_mode(
         n_initial,
         points_generator=points_generator,
         field_fn=analytical_field_two_mode,
+    )
+
+
+def train_piratenets_two_mode(
+    steps: int = 4000,
+    seed: int = 0,
+    n_collocation: int = 200,
+    n_boundary: int = 64,
+    n_initial: int = 64,
+    lr: float = 3e-3,
+    hidden: int = 64,
+    num_blocks: int = 4,
+    fourier_scale: float = 1.0,
+) -> PirateNetCavityPINN:
+    # issue #41: same shipped point density/optimizer/step budget as train_cavity_two_mode /
+    # train_fourier_cavity_two_mode (issue #22) -- architecture is the only variable. hidden=64
+    # matches the capacity already given to the num_bands=4 comparison point (issue #10's fix),
+    # rather than the 32-hidden plain/num_bands=2 baselines, so PirateNets isn't compared against
+    # a narrower body than the strongest existing baseline it's meant to be judged against.
+    torch.manual_seed(seed)
+    model = PirateNetCavityPINN(hidden=hidden, num_blocks=num_blocks, fourier_scale=fourier_scale)
+    return _train_pinn_adam(
+        model, steps, n_collocation, n_boundary, n_initial, lr, field_fn=analytical_field_two_mode
     )
 
 
