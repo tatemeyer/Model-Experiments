@@ -123,6 +123,7 @@ destabilize training, and how is it fixed?
 | #10 | Does more network capacity close the residual gap? | ✅ | `experiments/num-bands-gap/010-network-capacity.md` |
 | #11 | Does SOAP close the rest of the gap? | ✅ (fully, independently of #10) | `experiments/num-bands-gap/011-soap-optimizer.md` |
 | #38 | Is the residual instability an FP32 precision artifact ("FP64 is All You Need")? | ❌ not a precision artifact | `experiments/num-bands-gap/038-fp64-precision.md` |
+| #40 | Does Sobol quasi-random sampling reduce the issue #12 point-draw variance? | ⚠️ real but modest on top of issue #10's capacity fix, which already did most of the work | `experiments/num-bands-gap/040-sobol-sampling.md` |
 
 **Thread: `two-mode-spectral-bias/`** — does a two-mode target reproduce
 spectral bias, and what fixes it?
@@ -163,10 +164,19 @@ stale.
 - SOAP/SS-Broyden hyperparameters (`lr`, `betas`, `precondition_frequency`)
   are untuned library defaults; there may be room to reduce `steps` below
   2000 without losing accuracy (`011-soap-optimizer.md`).
-- Why density-vs-accuracy was non-monotonic in the 1000-4000 range was
-  investigated (`012-point-draw-variance.md`: it's the point draw) but
-  the fix — quasi-random/stratified sampling (Sobol, Latin hypercube) —
-  is untried. Queued as **issue #40**.
+- ~~Why density-vs-accuracy was non-monotonic in the 1000-4000 range was
+  investigated (`012-point-draw-variance.md`: it's the point draw); does
+  quasi-random sampling (Sobol) fix it?~~ Tried in issue #40, which also
+  finally re-verified issue #12's own flagged 32-hidden-vs-64-hidden gap
+  along the way: at the current 64-hidden default, uniform sampling's
+  point-draw stdev had already shrunk ~4-7x from capacity alone (0.035/
+  0.047 → 0.0082/0.0066) — issue #10's capacity fix, not sampling
+  method, turned out to be the dominant lever. Against that matched
+  64-hidden baseline, Sobol gives a real further stdev reduction
+  (~1.4-2.3x) but only marginal mean-accuracy improvement (~5%) — a
+  modest refinement on top of the capacity fix, not a standalone
+  dramatic fix. Latin hypercube (issue #12's other named candidate) is
+  still untried. See `040-sobol-sampling.md`.
 - ~~Is the residual `num_bands=4` L-BFGS instability actually an FP32
   precision artifact rather than an optimization one?~~ Tested in
   **issue #38**: no — FP64 at a matched iteration budget leaves both the
@@ -287,6 +297,6 @@ stale.
   for the reasoning.
 - The `num_bands=4/6` instability is now mostly explained and resolved
   (see the `num-bands-gap` thread above); an FP32-precision-artifact
-  explanation was tested and ruled out (issue #38), one lead (quasi-random
-  sampling, issue #40) remains open there.
+  explanation was tested and ruled out (issue #38), and quasi-random
+  (Sobol) sampling was tested and found to help modestly (issue #40).
 

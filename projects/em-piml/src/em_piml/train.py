@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from typing import Literal
 
 import numpy as np
 import torch
@@ -102,6 +103,41 @@ def _sample_points(
     return x_c, t_c, x_b0, x_bl, t_b, x_i, t_i
 
 
+def _sample_points_sobol(
+    n_collocation: int,
+    n_boundary: int,
+    n_initial: int,
+    seed: int,
+    t_max: float = PERIOD,
+    dtype: torch.dtype = torch.float32,
+    device: torch.device = torch.device("cpu"),
+) -> tuple[torch.Tensor, ...]:
+    # Quasi-random (Sobol) collocation sampling (issue #40, "Quasi Random Physics-Informed Neural
+    # Networks," arXiv:2507.08121) -- a low-discrepancy alternative to _sample_points' pseudo-
+    # random torch.rand, tested against issue #12's point-draw-variance benchmark
+    # (point_draw_sweep.py). One 2D SobolEngine (scrambled -- unscrambled Sobol repeats the same
+    # first point every seed, which would break the "independent draws" premise this is tested
+    # under -- seeded independently of model init, same role as points_seed) is drawn from
+    # sequentially: n_collocation points for (x_c, t_c), then n_boundary more for t_b (column 0
+    # only, x_b0/x_bl are already deterministic), then n_initial more for x_i (column 0 only,
+    # t_i is already deterministic) -- so every draw advances the same low-discrepancy sequence
+    # rather than restarting it per point set. SobolEngine only draws on CPU, so device=cpu
+    # (default) is a genuine no-op .to(); a non-CPU device moves the drawn points afterward
+    # (device-abstraction Arc, Slice 2, issue #59's device= idiom, extended here).
+    engine = torch.quasirandom.SobolEngine(dimension=2, scramble=True, seed=seed)
+    collocation = engine.draw(n_collocation).to(dtype=dtype, device=device)
+    x_c = collocation[:, 0:1] * L
+    t_c = collocation[:, 1:2] * t_max
+    boundary = engine.draw(n_boundary).to(dtype=dtype, device=device)
+    t_b = boundary[:, 0:1] * t_max
+    x_b0 = torch.zeros(n_boundary, 1, dtype=dtype, device=device)
+    x_bl = torch.full((n_boundary, 1), L, dtype=dtype, device=device)
+    initial = engine.draw(n_initial).to(dtype=dtype, device=device)
+    x_i = initial[:, 0:1] * L
+    t_i = torch.zeros(n_initial, 1, dtype=dtype, device=device)
+    return x_c, t_c, x_b0, x_bl, t_b, x_i, t_i
+
+
 def _train_pinn_adam(
     model: torch.nn.Module,
     steps: int,
@@ -142,12 +178,26 @@ def _train_pinn_lbfgs(
     field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
     dtype: torch.dtype = torch.float32,
     device: torch.device = torch.device("cpu"),
+    sobol_points_seed: int | None = None,
 ) -> torch.nn.Module:
     # L-BFGS assumes a fixed (deterministic) objective across its internal line-search
     # evaluations, so — unlike Adam — collocation points are sampled once, not per step.
-    points = _sample_points(
-        n_collocation, n_boundary, n_initial, generator=points_generator, dtype=dtype, device=device
-    )
+    # sobol_points_seed=None (default) preserves existing behavior exactly, same opt-in idiom as
+    # points_generator=None -- passing it selects Sobol sampling (issue #40) instead of uniform,
+    # ignoring points_generator entirely (the two are mutually exclusive sampling schemes).
+    if sobol_points_seed is not None:
+        points = _sample_points_sobol(
+            n_collocation, n_boundary, n_initial, seed=sobol_points_seed, dtype=dtype, device=device
+        )
+    else:
+        points = _sample_points(
+            n_collocation,
+            n_boundary,
+            n_initial,
+            generator=points_generator,
+            dtype=dtype,
+            device=device,
+        )
     optimizer = torch.optim.LBFGS(
         model.parameters(), max_iter=max_iter, history_size=50, line_search_fn="strong_wolfe"
     )
@@ -349,6 +399,7 @@ def train_fourier_cavity_lbfgs(
     hidden: int = 64,
     dtype: torch.dtype = torch.float32,
     device: torch.device | str | None = None,
+    sampling: Literal["uniform", "sobol"] = "uniform",
 ) -> FourierCavityPINN:
     # points_seed=None (default): points are drawn from the same global RNG stream as model
     # init, exactly as before (issue #8's behavior, unaffected). Passing an explicit
@@ -365,12 +416,20 @@ def train_fourier_cavity_lbfgs(
     # torch.float64 (see train_fourier_cavity_lbfgs_fp64 below) to test "FP64 is All You Need"
     # (arXiv:2505.10949)'s claim that L-BFGS's convergence test firing early under FP32 explains
     # PINN failure modes previously attributed to genuine local optima.
+    # sampling="uniform" (default) preserves existing behavior bit-for-bit; sampling="sobol"
+    # (issue #40) requires points_seed (used as the Sobol engine's own seed instead of a
+    # torch.Generator) and routes through _sample_points_sobol instead of uniform torch.rand.
     device = resolve_device(device)
     torch.manual_seed(seed)
     model = FourierCavityPINN(hidden=hidden, num_layers=3, num_bands=num_bands)
     model = model.to(device=device, dtype=dtype)
     points_generator = None
-    if points_seed is not None:
+    sobol_points_seed = None
+    if sampling == "sobol":
+        if points_seed is None:
+            raise ValueError("sampling='sobol' requires points_seed (used as the Sobol seed)")
+        sobol_points_seed = points_seed
+    elif points_seed is not None:
         # torch.Generator is device-bound (device-abstraction Arc Charter Sec5): a CUDA generator
         # draws a different sequence than a CPU one for the same seed, so points_seed's
         # reproducibility guarantee holds within a device, not across devices.
@@ -385,6 +444,7 @@ def train_fourier_cavity_lbfgs(
         points_generator=points_generator,
         dtype=dtype,
         device=device,
+        sobol_points_seed=sobol_points_seed,
     )
 
 
