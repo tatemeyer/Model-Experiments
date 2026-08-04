@@ -163,6 +163,7 @@ periods collapses to a degenerate near-constant output; what fixes it?
 |---|---|---|---|
 | #20 | Does pseudo-sequence tokenization (PINNsFormer) beat the raw-coordinate baseline? | 🔻 markedly worse | `experiments/020-pseudo-sequence-tokenization.md` |
 | #46 | Does capacity help resolve a local dielectric-interface derivative kink, in contrast to issue #25's negative global-spectral-content finding? | ⚠️ real but modest, reduced-scope result | `experiments/046-dielectric-interface-capacity.md` |
+| #64 | Does the field-persist -> mx-viz-render pipeline (issues #61/#62) work end-to-end on real data? | ✅ | `experiments/064-field-persist-render-poc.md` |
 
 ## Open leads
 
