@@ -5,6 +5,7 @@ from typing import Literal
 
 import numpy as np
 import torch
+from mx_viz import io as viz_io
 from pytorch_optimizer import SOAP
 
 from em_piml.device import resolve_device
@@ -1537,6 +1538,37 @@ def evaluate_field_slice(
         predicted = model(x_t, t).reshape(-1)
         true = field_fn(x_t, t).reshape(-1)
     return predicted.cpu().numpy(), true.cpu().numpy()
+
+
+def save_field_grid_artifact(
+    model: torch.nn.Module,
+    path: str,
+    field_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = analytical_field,
+    t_max: float = PERIOD,
+    x_range: tuple[float, float] = (0.0, L),
+    n_x: int = 100,
+    n_t: int = 100,
+    device: torch.device | str | None = None,
+) -> None:
+    """Evaluate a trained model's target/predicted field over a grid and persist it via
+    mx_viz.io.save_field_artifact, so mx-viz can render it later without a live model (this
+    project has no other model checkpointing -- see evaluate_field_grid for the eval half).
+    Callers pass an explicit path, conventionally under .outputs/em-piml/ (gitignored)."""
+    grid_x, grid_t, predicted, true = evaluate_field_grid(
+        model, field_fn=field_fn, t_max=t_max, x_range=x_range, n_x=n_x, n_t=n_t, device=device
+    )
+    # torch.meshgrid(xs, ts, indexing="xy") makes grid_x constant along axis 0 and grid_t
+    # constant along axis 1 -- see evaluate_field_grid -- so row 0 / column 0 recover the
+    # original 1D axes without re-deriving them from x_range/t_max here.
+    viz_io.save_field_artifact(
+        path,
+        x=grid_x[0, :],
+        t=grid_t[:, 0],
+        grid_x=grid_x,
+        grid_t=grid_t,
+        true=true,
+        predicted=predicted,
+    )
 
 
 def main() -> None:

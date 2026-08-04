@@ -1,6 +1,23 @@
 from __future__ import annotations
 
+import numpy as np
 from mx_viz import cli, io
+
+
+def test_field_command_validates_artifact(tmp_path, capsys):
+    x = np.linspace(0.0, 1.0, 4)
+    t = np.linspace(0.0, 1.0, 3)
+    grid_x, grid_t = np.meshgrid(x, t, indexing="xy")
+    true = grid_x + grid_t
+    artifact_path = tmp_path / "field.npz"
+    io.save_field_artifact(
+        artifact_path, x=x, t=t, grid_x=grid_x, grid_t=grid_t, true=true, predicted=true
+    )
+
+    exit_code = cli.main(["field", str(artifact_path)])
+
+    assert exit_code == 0
+    assert "schema_version=1" in capsys.readouterr().out
 
 
 def test_sweep_command_writes_image(tmp_path):

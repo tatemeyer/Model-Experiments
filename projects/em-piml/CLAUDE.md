@@ -77,6 +77,15 @@ imports `em_piml.physics.analytical_field` rather than duplicating the
 formula — it works because `uv sync --all-packages` installs every
 workspace member (including this one) into the one shared venv.
 
+A trained model's own target/predicted field grid can be persisted for
+later rendering (no other model checkpointing exists in this project):
+`train.save_field_grid_artifact(model, path)` wraps
+`evaluate_field_grid` and writes an mx-viz field artifact (`mx_viz.io.
+save_field_artifact`/`load_field_artifact`) to a `.npz` file —
+conventionally under `.outputs/em-piml/` (gitignored). `uv run mx-viz
+field <path>` validates/summarizes the resulting artifact; `mx_viz.
+fields` renders it once a render function exists to consume it.
+
 ## Where to find things
 
 This file stays a short, stable router — it does not grow a new section
