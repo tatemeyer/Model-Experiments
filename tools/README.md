@@ -44,14 +44,20 @@ does.
   step, e.g. `em_piml.train.evaluate_field_grid`/`evaluate_field_slice`).
   `save_results`/`load_results` persist a sweep's `{variant: {seed:
   value}}` results as JSON (schema: `{"metadata": {...}, "results":
-  {...}}`) so they outlive the training process and can be re-plotted
-  later — write these to `.outputs/<project>/` at the repo root
-  (gitignored, mirrors `.data/`'s pattern, never commit generated
-  plots/results). One CLI verb exists for the one case with a natural
-  persisted artifact:
+  {...}}`), and `save_field_artifact`/`load_field_artifact` persist a
+  target/predicted field evaluation as a plain-array `.npz` (schema:
+  `x, t, grid_x, grid_t, true, predicted, schema_version`;
+  `load_field_artifact` enforces `allow_pickle=False`) — both so results
+  outlive the training process and can be re-plotted later. Write these
+  to `.outputs/<project>/` at the repo root (gitignored, mirrors
+  `.data/`'s pattern, never commit generated plots/results). Two CLI
+  verbs exist for the two cases with a natural persisted artifact:
   ```
   uv run mx-viz sweep .outputs/em-piml/some_sweep.json --out sweep.png [--kind box|bar]
+  uv run mx-viz field .outputs/em-piml/some_field.npz
   ```
-  Field/loss-curve plots stay library-only (no model checkpointing
-  exists in this repo to build a CLI verb around yet) — call them
-  directly from a training script or research session.
+  `em_piml.train.save_field_grid_artifact(model, path)` wraps
+  `evaluate_field_grid` to produce a field artifact. Loss-curve plots
+  stay library-only (no loss-history checkpointing exists in this repo
+  yet) — call `plot_loss_curve` directly from a training script or
+  research session.
