@@ -10,7 +10,11 @@ dependencies = ["matplotlib>=3.8", "numpy>=1.26"]
 # near-term Slices (field-render-core, plotly-interactive) and no reason was found to split them.
 # Optional: only reachable in CI via `uv sync --all-extras` (ci.yml), never part of the default
 # `uv sync --all-packages` footprint any other workspace member picks up transitively.
-3d = ["pyvista>=0.45", "plotly>=5.24"]
+3d = [
+    "pyvista>=0.45",
+    "plotly>=5.24",
+    "kaleido==0.2.1",
+]
 
 [project.scripts]
 mx-viz = "mx_viz.cli:main"
