@@ -15,6 +15,9 @@ dependencies = ["matplotlib>=3.8", "numpy>=1.26"]
 # without either -- required for the self-contained-HTML export path, not just jupyter-notebook
 # embedding, so pulled in directly rather than via the heavier `pyvista[jupyter]` extra (which also
 # drags in ipywidgets and friends this repo has no other use for).
+# kaleido (issue #63): Plotly's static-image export backend, pinned to 0.2.1 -- 1.0+ requires a
+# separately-installed system Chrome via `choreographer`; 0.2.1's bundled Chromium is closer in
+# spirit to PyVista/VTK's self-contained off-screen renderer and is the CI-proven default.
 3d = [
     "pyvista>=0.45",
     "plotly>=5.24",
@@ -23,6 +26,7 @@ dependencies = ["matplotlib>=3.8", "numpy>=1.26"]
     "trame-vuetify>=2",
     "nest-asyncio2>=1.7.2",
     "imageio>=2.34",
+    "kaleido==0.2.1",
 ]
 
 [project.scripts]
