@@ -10,7 +10,20 @@ dependencies = ["matplotlib>=3.8", "numpy>=1.26"]
 # near-term Slices (field-render-core, plotly-interactive) and no reason was found to split them.
 # Optional: only reachable in CI via `uv sync --all-extras` (ci.yml), never part of the default
 # `uv sync --all-packages` footprint any other workspace member picks up transitively.
-3d = ["pyvista>=0.45", "plotly>=5.24"]
+# trame/trame-vtk/trame-vuetify (issue #62): PyVista's Plotter.export_html imports trame_vtk and
+# (transitively, via pyvista.trame.jupyter) trame.widgets.vuetify at call time, raising ImportError
+# without either -- required for the self-contained-HTML export path, not just jupyter-notebook
+# embedding, so pulled in directly rather than via the heavier `pyvista[jupyter]` extra (which also
+# drags in ipywidgets and friends this repo has no other use for).
+3d = [
+    "pyvista>=0.45",
+    "plotly>=5.24",
+    "trame>=3",
+    "trame-vtk>=2",
+    "trame-vuetify>=2",
+    "nest-asyncio2>=1.7.2",
+    "imageio>=2.34",
+]
 
 [project.scripts]
 mx-viz = "mx_viz.cli:main"
