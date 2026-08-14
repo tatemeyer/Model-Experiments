@@ -12,7 +12,9 @@ Run: uv run python -m jepa.momentum_steps_sweep
 
 from __future__ import annotations
 
+import csv
 import statistics
+from pathlib import Path
 
 import torch
 
@@ -38,6 +40,76 @@ MAX_STEPS = max(CHECKPOINTS)
 # Rank alone cannot tell those apart; the loss trend can.
 SLOPE_WINDOW = 0.1
 
+# Rows are appended and flushed to disk as each checkpoint completes, so a killed run loses only
+# the run in flight: re-invoking the script skips every (variant, momentum, seed) that already has
+# a full set of checkpoint rows. .outputs/ is gitignored (generated results, regenerate rather
+# than commit). Delete this file to force a clean sweep.
+RESULTS_PATH = Path(".outputs/jepa/momentum_sweep_rows.csv")
+FIELDNAMES = (
+    "variant",
+    "momentum",
+    "seed",
+    "steps",
+    "effective_rank",
+    "embedding_std",
+    "final_loss",
+    "loss_slope",
+)
+
+
+def _open_results() -> tuple[csv.DictWriter, object]:
+    """Append-mode writer, creating the file with a header if it does not exist yet."""
+    RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    is_new = not RESULTS_PATH.exists()
+    handle = RESULTS_PATH.open("a", newline="", encoding="utf-8")
+    writer = csv.DictWriter(handle, fieldnames=FIELDNAMES)
+    if is_new:
+        writer.writeheader()
+        handle.flush()
+    return writer, handle
+
+
+def _load_rows() -> list[dict]:
+    """Every row already on disk, with numeric fields parsed back from text."""
+    if not RESULTS_PATH.exists():
+        return []
+    with RESULTS_PATH.open(newline="", encoding="utf-8") as handle:
+        rows = []
+        for raw in csv.DictReader(handle):
+            rows.append(
+                {
+                    "variant": raw["variant"],
+                    "momentum": None if raw["momentum"] == "" else float(raw["momentum"]),
+                    "seed": int(raw["seed"]),
+                    "steps": int(raw["steps"]),
+                    "effective_rank": float(raw["effective_rank"]),
+                    "embedding_std": float(raw["embedding_std"]),
+                    "final_loss": float(raw["final_loss"]),
+                    "loss_slope": float(raw["loss_slope"]),
+                }
+            )
+        return rows
+
+
+def _completed(rows: list[dict]) -> set[tuple[str, float | None, int]]:
+    """(variant, momentum, seed) combinations that already have every checkpoint recorded.
+    A partially-written run is deliberately NOT counted, so it re-runs cleanly rather than
+    leaving a hole in the surface."""
+    counts: dict[tuple[str, float | None, int], int] = {}
+    for row in rows:
+        if row["variant"] == "random_init":
+            key = (row["variant"], None, row["seed"])
+            counts[key] = counts.get(key, 0) + 1
+            continue
+        key = (row["variant"], row["momentum"], row["seed"])
+        counts[key] = counts.get(key, 0) + 1
+    expected = len(CHECKPOINTS)
+    return {
+        key
+        for key, count in counts.items()
+        if count >= (1 if key[0] == "random_init" else expected)
+    }
+
 
 def _loss_slope(history: list[float], upto: int) -> float:
     """Mean loss over the last SLOPE_WINDOW of the first `upto` steps minus the mean over the
@@ -50,8 +122,9 @@ def _loss_slope(history: list[float], upto: int) -> float:
     return statistics.mean(recent) - statistics.mean(earlier)
 
 
-def _run(variant: str, momentum: float | None, seed: int, rows: list[dict]) -> None:
-    """One training run to MAX_STEPS, recording metrics at every checkpoint."""
+def _run(variant: str, momentum: float | None, seed: int, writer, handle) -> None:
+    """One training run to MAX_STEPS, recording metrics at every checkpoint. Each row is written
+    and flushed as it is produced, so an interrupted sweep can resume."""
     history: list[float] = []
 
     def record(step: int, encoder) -> None:
@@ -66,7 +139,8 @@ def _run(variant: str, momentum: float | None, seed: int, rows: list[dict]) -> N
             "final_loss": history[step - 1],
             "loss_slope": _loss_slope(history, step),
         }
-        rows.append(row)
+        writer.writerow({**row, "momentum": "" if momentum is None else momentum})
+        handle.flush()
         shown = "n/a" if momentum is None else f"{momentum:g}"
         print(
             f"  {variant:>11} m={shown:>7} seed={seed} steps={step:>4}: "
@@ -87,38 +161,58 @@ def _run(variant: str, momentum: float | None, seed: int, rows: list[dict]) -> N
 
 
 def main() -> None:
-    rows: list[dict] = []
+    done = _completed(_load_rows())
+    if done:
+        print(f"resuming: {len(done)} run(s) already complete in {RESULTS_PATH}", flush=True)
+    writer, handle = _open_results()
 
-    print("--- momentum sweep (EMA) ---", flush=True)
-    for momentum in MOMENTA:
+    try:
+        print("--- momentum sweep (EMA) ---", flush=True)
+        for momentum in MOMENTA:
+            for seed in SEEDS:
+                if ("full", momentum, seed) in done:
+                    print(f"  skip full m={momentum:g} seed={seed} (done)", flush=True)
+                    continue
+                _run("full", momentum, seed, writer, handle)
+
+        print("--- no-EMA control ---", flush=True)
         for seed in SEEDS:
-            _run("full", momentum, seed, rows)
+            if ("no_ema", None, seed) in done:
+                print(f"  skip no_ema seed={seed} (done)", flush=True)
+                continue
+            _run("no_ema", None, seed, writer, handle)
 
-    print("--- no-EMA control ---", flush=True)
-    for seed in SEEDS:
-        _run("no_ema", None, seed, rows)
+        print("--- random-init control (untrained) ---", flush=True)
+        for seed in SEEDS:
+            if ("random_init", None, seed) in done:
+                print(f"  skip random_init seed={seed} (done)", flush=True)
+                continue
+            encoder = build_encoder("random_init", seed)
+            metrics = collapse_metrics(encoder, seed)
+            writer.writerow(
+                {
+                    "variant": "random_init",
+                    "momentum": "",
+                    "seed": seed,
+                    "steps": 0,
+                    "effective_rank": metrics["effective_rank"],
+                    "embedding_std": metrics["embedding_std"],
+                    "final_loss": float("nan"),
+                    "loss_slope": float("nan"),
+                }
+            )
+            handle.flush()
+            print(
+                f"  random_init seed={seed}: rank={metrics['effective_rank']:.3f} "
+                f"std={metrics['embedding_std']:.4f}",
+                flush=True,
+            )
+    finally:
+        handle.close()
 
-    print("--- random-init control (untrained) ---", flush=True)
-    for seed in SEEDS:
-        encoder = build_encoder("random_init", seed)
-        metrics = collapse_metrics(encoder, seed)
-        rows.append(
-            {
-                "variant": "random_init",
-                "momentum": None,
-                "seed": seed,
-                "steps": 0,
-                "effective_rank": metrics["effective_rank"],
-                "embedding_std": metrics["embedding_std"],
-                "final_loss": float("nan"),
-                "loss_slope": float("nan"),
-            }
-        )
-        print(
-            f"  random_init seed={seed}: rank={metrics['effective_rank']:.3f} "
-            f"std={metrics['embedding_std']:.4f}",
-            flush=True,
-        )
+    # Summarize from disk, so a resumed sweep reports the complete surface rather than only the
+    # cells this invocation happened to compute.
+    rows = _load_rows()
 
     print("\n--- effective_rank summary (mean over seeds) ---", flush=True)
     print(f"{'variant/momentum':>18} " + " ".join(f"{c:>8}" for c in CHECKPOINTS), flush=True)
