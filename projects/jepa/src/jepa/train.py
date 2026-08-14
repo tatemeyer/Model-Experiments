@@ -47,7 +47,8 @@ def train_jepa(
     pool_size: int = POOL_SIZE,
     ema_momentum: float = EMA_MOMENTUM,
     history: list[float] | None = None,
-) -> tuple[PatchEncoder, EMATargetEncoder, Predictor]:
+    use_ema: bool = True,
+) -> tuple[PatchEncoder, EMATargetEncoder | PatchEncoder, Predictor]:
     # seed before model construction, not after (projects/em-piml/CLAUDE.md issue #19's standing
     # rule) -- the frame pool and masking RNG are seeded from the same `seed` value but via their
     # own independent generators (numpy, not torch's global RNG), so this ordering doesn't affect
@@ -56,7 +57,22 @@ def train_jepa(
     encoder = PatchEncoder(
         image_size=CANVAS_SIZE, patch_size=PATCH_SIZE, embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM
     )
-    target_encoder = EMATargetEncoder(encoder)
+    target_encoder: EMATargetEncoder | PatchEncoder
+    if use_ema:
+        target_encoder = EMATargetEncoder(encoder)
+    else:
+        # No-EMA ablation (Arc 1 Slice 1 Task E, issue #69): the target/teacher network is a
+        # distinct, independently initialized encoder trained jointly via ordinary gradient
+        # descent through the same prediction loss -- no stop-gradient, no momentum update. This
+        # is the collapse failure mode EMA + stop-gradient targets exist to prevent in
+        # Siamese/BYOL-style architectures (nothing stops both encoders from co-adapting to a
+        # trivial constant solution that trivially minimizes the loss).
+        target_encoder = PatchEncoder(
+            image_size=CANVAS_SIZE,
+            patch_size=PATCH_SIZE,
+            embed_dim=EMBED_DIM,
+            hidden_dim=HIDDEN_DIM,
+        )
     predictor = Predictor(
         embed_dim=EMBED_DIM, num_patches=encoder.num_patches, predictor_dim=PREDICTOR_DIM
     )
@@ -66,9 +82,10 @@ def train_jepa(
     batch_rng = torch.Generator().manual_seed(seed)
     mask_rng = np.random.default_rng(seed)
 
-    optimizer = torch.optim.Adam(
-        list(encoder.parameters()) + list(predictor.parameters()), lr=lr
-    )
+    trainable_params = list(encoder.parameters()) + list(predictor.parameters())
+    if not use_ema:
+        trainable_params += list(target_encoder.parameters())
+    optimizer = torch.optim.Adam(trainable_params, lr=lr)
 
     for _ in range(steps):
         batch_idx = torch.randint(0, pool_size, (batch_size,), generator=batch_rng)
@@ -80,7 +97,10 @@ def train_jepa(
 
         online_tokens = encoder(batch)
         context_tokens = online_tokens[:, context_idx, :]
-        with torch.no_grad():
+        if use_ema:
+            with torch.no_grad():
+                target_tokens = target_encoder(batch)[:, target_idx, :]
+        else:
             target_tokens = target_encoder(batch)[:, target_idx, :]
 
         predicted = predictor(context_tokens, context_idx, target_idx)
@@ -89,7 +109,8 @@ def train_jepa(
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        target_encoder.update(encoder, ema_momentum)
+        if use_ema:
+            target_encoder.update(encoder, ema_momentum)
 
         if history is not None:
             history.append(loss.item())
