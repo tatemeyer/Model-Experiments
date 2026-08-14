@@ -996,3 +996,80 @@ gh run list --branch main --limit 3              # expect: no failures
 ```
 
 The Dependabot fix cannot be confirmed until its next scheduled run; check with `gh run list --workflow "Dependabot Updates" --limit 3` a day later, or trigger it from the repository's Insights → Dependency graph → Dependabot tab.
+
+---
+
+## Outcome (2026-08-14)
+
+**Phases 1 and 2 complete. Phase 3 deliberately stopped at diagnosis.**
+
+### Shipped
+
+- Issues **#62, #63, #64** restacked onto `main` and closed via PRs
+  **#91/#92/#93** — the field-visualization Arc is now actually on `main`.
+  PR #87 closed as obsolete.
+- **Dependabot fixed** (PR **#95**): `requires-python >= 3.12` across the
+  workspace; `uv.lock` collapsed from a split `numpy v2.4.6, v2.5.1` marker
+  resolution to a single `v2.5.1`. Confirmed working — the `Dependency Graph`
+  "Configured Graph Update: uv" run on `main` succeeded afterwards.
+- **All 18 worktree directories removed.** `git worktree remove` reported
+  "Filename too long" (Windows MAX_PATH, deep `.venv` paths) and deregistered
+  without deleting; the fix was `Remove-Item -LiteralPath '\?\<abs path>'`.
+  The Administrator-owned worktree needed no elevated delete after all.
+- **Local branches pruned 43 -> 3** (`main` plus the two salvage branches).
+  `delete_branch_on_merge` enabled.
+
+### Two salvages, one unplanned
+
+- `feat/em-piml-helmholtz-capacity` — issue #43's implementation.
+- `feat/jepa-baseline-collapse-avoidance-salvage` — **issue #69's near-complete
+  deliverable**, found uncommitted inside the Administrator-owned worktree that
+  git could not even read, one delete away from destruction. Write-up, 27
+  `results.csv` rows, three regression tests, and a `use_ema` flag. Reported on
+  issue #69; no PR opened (it is `autonomy:review`).
+
+### Corrections to this plan's own premises
+
+1. **Tasks 1-2 were wrong** — see the Amendment above. Both PRs targeted stale
+   non-`main` bases; `mergeStateStatus: CLEAN` was true relative to a dead base.
+2. **`main` is NOT unprotected.** The initial finding came from
+   `GET /branches/main/protection` returning 404, which is simply what the
+   classic endpoint returns for a **ruleset**-protected branch. Three rulesets
+   are active; the `main` one enforces PRs, the `verify` check (strict), linear
+   history, and blocks deletion/non-fast-forward. Issue #94 has been corrected
+   and retitled.
+3. **Remote branch pruning is impossible as configured.** The
+   `feature-branches` ruleset has a `deletion` rule covering `feat/**`,
+   `fix/**`, `docs/**`, `chore/**`, so all 50 merged remote branches are
+   undeletable — this is also why `--delete-branch` and
+   `delete_branch_on_merge` never worked. Left in place by decision; recorded
+   on issue #94.
+
+### Why Phase 3 stopped
+
+The salvaged Helmholtz implementation **collapses to the trivial `E = 0`
+solution for every mode order above the fundamental** (`relative_l2` 1.0000 at
+n>=4), with the amplitude anchor itself ignored. Verified mechanism: `loss_pde`
+carries a `k^2 ~ 2530` factor at n=16 against a single-point, weight-1 anchor,
+so `E -> 0` is the cheapest minimum. Out-of-tree rebalancing recovers n=2
+(0.9445 -> 0.0095) and n=4 (1.0000 -> 0.1551) at identical capacity, but not
+n=8.
+
+Running the capacity sweep in this state would measure collapse, not capacity,
+and produce a confidently wrong "capacity does not help" result. Choosing a
+loss formulation is a design decision that belongs in a
+`superpowers:brainstorming` pass, not an ad-hoc mid-implementation fix. Full
+diagnosis posted to issue #43; the branch carries the recovered code plus two
+passing fast tests (closed-form reference correctness, seed determinism) and
+deliberately no capacity regression test.
+
+Budget note for whoever picks it up: the full 64-run sweep measured **~107
+min** (100.1s worst case at hidden=256, n=16), over convention — it needs
+reducing, with the reduction stated explicitly (issue #46 precedent).
+
+### Known environment caveat
+
+`test_export_png_writes_nonempty_file` and
+`test_render_orbit_gif_writes_nonempty_file` drive kaleido's headless-Chromium
+subprocess and **hang indefinitely on Windows**. Deselect them locally; Linux
+CI runs them normally. Pre-existing, documented in `670efe9`'s commit message.
