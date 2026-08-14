@@ -2,7 +2,7 @@
 name = "mx-viz"
 version = "0.1.0"
 description = "Repo-wide plotting toolkit for visualizing research experiments and results"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = ["matplotlib>=3.8", "numpy>=1.26"]
 
 [project.optional-dependencies]
