@@ -12,6 +12,8 @@ the reusable, versioned reference dataset for external use.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
+
 import numpy as np
 import torch
 
@@ -48,6 +50,8 @@ def train_jepa(
     ema_momentum: float = EMA_MOMENTUM,
     history: list[float] | None = None,
     use_ema: bool = True,
+    checkpoint_steps: Sequence[int] | None = None,
+    on_checkpoint: Callable[[int, PatchEncoder], None] | None = None,
 ) -> tuple[PatchEncoder, EMATargetEncoder | PatchEncoder, Predictor]:
     # seed before model construction, not after (projects/em-piml/CLAUDE.md issue #19's standing
     # rule) -- the frame pool and masking RNG are seeded from the same `seed` value but via their
@@ -86,8 +90,9 @@ def train_jepa(
     if not use_ema:
         trainable_params += list(target_encoder.parameters())
     optimizer = torch.optim.Adam(trainable_params, lr=lr)
+    checkpoint_set = set(checkpoint_steps or ())
 
-    for _ in range(steps):
+    for step in range(steps):
         batch_idx = torch.randint(0, pool_size, (batch_size,), generator=batch_rng)
         batch = frame_pool[batch_idx]
 
@@ -114,6 +119,24 @@ def train_jepa(
 
         if history is not None:
             history.append(loss.item())
+
+        if on_checkpoint is not None and (step + 1) in checkpoint_set:
+            # Fired after the optimizer step and EMA update, so the encoder reflects a completed
+            # step.
+            #
+            # The global torch RNG is saved and restored around the callback because training
+            # *does* consume it: Predictor's nn.TransformerEncoderLayer stack carries six Dropout
+            # modules at the PyTorch default p=0.1, and dropout samples from the global RNG every
+            # step. (Batches and masks come from the explicit batch_rng/mask_rng generators, which
+            # is what makes this the *only* global-RNG dependency -- but it is enough.) Without
+            # this guard a callback that touches the global RNG silently changes the trajectory it
+            # is meant to observe, which would corrupt every downstream metric.
+            # Asserted by test_checkpoint_hook_does_not_perturb_training.
+            rng_state = torch.get_rng_state()
+            try:
+                on_checkpoint(step + 1, encoder)
+            finally:
+                torch.set_rng_state(rng_state)
 
     return encoder, target_encoder, predictor
 

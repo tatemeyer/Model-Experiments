@@ -88,7 +88,11 @@ git checkout -b feat/jepa-momentum-collapse-boundary
 
 ### Task 2: Checkpoint-evaluation hook, with determinism proof
 
-The spec's central technical risk. `train_jepa` seeds globally once before model construction, then uses explicit `batch_rng` and `mask_rng` inside the loop. If that reading is right, a mid-training callback cannot perturb training. **This task proves it before anything depends on it.**
+The spec's central technical risk. **Outcome, recorded 2026-08-14: the assumption was wrong, and the gate caught it.**
+
+The spec assumed a callback could not perturb training because batches and masks come from explicit generators. In fact `Predictor`'s `nn.TransformerEncoderLayer` stack carries **six `Dropout` modules at the default `p=0.1`**, and dropout draws from the **global** torch RNG every step — so a callback touching the global RNG changes the loss curve immediately. Verified: a no-op callback is bit-identical; a reseeding callback is not.
+
+Rather than fall back to retraining per step count (4× cost), the implementation below saves and restores the global RNG state around the callback, making any callback safe. Steps 3 and 4 reflect that fix.
 
 **Files:**
 - Modify: `projects/jepa/src/jepa/train.py`
@@ -180,11 +184,22 @@ At the very end of the loop body, after the `if history is not None:` block, add
 
 ```python
         if on_checkpoint is not None and (step + 1) in checkpoint_set:
-            # Fired after the optimizer step and EMA update so the encoder reflects a completed
-            # step. Training draws only from batch_rng/mask_rng, never torch's global RNG, so a
-            # callback is free to use the global RNG without changing this run's trajectory --
-            # asserted by test_checkpoint_hook_does_not_perturb_training.
-            on_checkpoint(step + 1, encoder)
+            # Fired after the optimizer step and EMA update, so the encoder reflects a completed
+            # step.
+            #
+            # The global torch RNG is saved and restored around the callback because training
+            # *does* consume it: Predictor's nn.TransformerEncoderLayer stack carries six Dropout
+            # modules at the PyTorch default p=0.1, and dropout samples from the global RNG every
+            # step. (Batches and masks come from the explicit batch_rng/mask_rng generators, which
+            # is what makes this the *only* global-RNG dependency -- but it is enough.) Without
+            # this guard a callback that touches the global RNG silently changes the trajectory it
+            # is meant to observe, which would corrupt every downstream metric.
+            # Asserted by test_checkpoint_hook_does_not_perturb_training.
+            rng_state = torch.get_rng_state()
+            try:
+                on_checkpoint(step + 1, encoder)
+            finally:
+                torch.set_rng_state(rng_state)
 ```
 
 - [ ] **Step 4: Run the test to verify it passes**
@@ -195,7 +210,7 @@ uv run pytest projects/jepa/tests/test_train.py::test_checkpoint_hook_does_not_p
 
 Expected: PASS.
 
-**If it FAILS, stop and report.** The determinism assumption is wrong, and the sweep must retrain per step count instead — 4× the cost and a spec change, not something to paper over.
+**If it FAILS, stop and report.** Do not weaken the test to make it pass — its whole purpose is to catch a silent trajectory change that would corrupt every downstream metric. When this gate first ran it *did* fail (see the outcome note at the top of this task); the correct response was to find the real global-RNG consumer and guard against it, not to relax the assertion.
 
 - [ ] **Step 5: Confirm no regression in the existing jepa tests**
 

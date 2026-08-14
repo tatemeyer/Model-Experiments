@@ -99,14 +99,30 @@ line for "healthy-looking but untrained."
 receiving the current step and the live encoder. Everything else about the
 signature and behaviour is unchanged.
 
-**Determinism claim to verify, not assume.** `train_jepa` seeds globally once
-before model construction, then uses explicit `batch_rng` (a `torch.Generator`)
-and `mask_rng` (a `numpy` generator) inside its loop — never torch's global
-RNG. A mid-training evaluation that touches the global RNG should therefore not
-perturb training. This is a reading of the code, and the implementation plan's
-**first task** is a test proving it: a checkpointed run and an unhooked run at
-the same seed must produce bit-identical loss curves. If that fails, the sweep
-must retrain per step count instead, at 4× the cost.
+**Determinism: the original claim here was wrong. Corrected 2026-08-14 during
+implementation.**
+
+This spec originally asserted that `train_jepa` "never uses torch's global RNG"
+inside its loop — batches come from an explicit `batch_rng`, masks from a numpy
+generator — and concluded a callback could not perturb training.
+
+**That is false.** `Predictor`'s `nn.TransformerEncoderLayer` stack carries
+**six `Dropout` modules at PyTorch's default `p=0.1`**, and dropout samples from
+the global RNG on every training step. Measured directly: a no-op callback
+leaves training bit-identical, but a callback that reseeds the global RNG
+changes the loss curve from step one.
+
+The batch/mask generators being explicit is what makes dropout the *only*
+global-RNG dependency — but one is enough to break the guarantee.
+
+**Resolution:** rather than retreat to retraining per step count (4× the cost),
+`train_jepa` saves and restores the global RNG state around the callback, so
+*any* callback is safe regardless of what it does. The determinism test uses a
+deliberately hostile callback (`torch.manual_seed(999)` plus a draw) to prove
+it, and remains the plan's first task and a hard gate.
+
+This is exactly why the spec demanded the claim be verified rather than
+assumed — the reading was plausible and wrong.
 
 ### 2. `src/jepa/momentum_steps_sweep.py`
 
