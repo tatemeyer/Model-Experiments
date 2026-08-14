@@ -23,7 +23,74 @@
 
 ---
 
-### Task 1: Merge PR #88
+## Amendment 2026-08-14: Tasks 1 and 2 are superseded
+
+**Tasks 1 and 2 below rest on a false premise and must not be executed as
+written.** Both PRs targeted stale intermediate branches, not `main`:
+
+| PR | Issue | Base branch | GitHub state | Content on `main`? |
+|---|---|---|---|---|
+| #86 | #62 | `feat/em-piml-field-array-persistence` | MERGED | **No** |
+| #87 | #63 | `feat/em-piml-field-array-persistence` | OPEN | No |
+| #88 | #64 | `feat/em-piml-field-render-core` | MERGED | **No** |
+
+Only #85 had `main` as its base. #86 and #88 display as MERGED but merged
+into branches that were themselves never fast-forwarded into `main`, so
+three finished slices are stranded. This — not a stacked-PR auto-close
+quirk — is why issues #62/#63/#64 stayed open.
+
+Executing Task 1 as written merged #88 into the dead
+`feat/em-piml-field-render-core` branch, with **zero net effect on `main`**.
+Its squash commit `25faa10` survives there; nothing was lost.
+
+Verified by dry run: `git rebase --onto main d161c04 25faa10` replays issues
+#62 and #64 onto `main` with **no conflicts**. Cherry-picking #63's
+`670efe9` conflicts in exactly two files — `tools/viz/pyproject.toml` and
+`uv.lock` — resolved by unioning the dependency lists and running `uv lock`.
+The plotly source and test files apply cleanly.
+
+**Replace Tasks 1 and 2 with Tasks 1A, 1B, and 1C**: three sequential PRs
+based on `main`, squash-merged in issue order, so `main` gets one clean
+squash commit per issue and each issue auto-closes on its own PR.
+
+### Task 1A: Restack issue #62 (field rendering + PyVista 3D surface)
+
+- [ ] **Step 1:** `git checkout main && git pull --ff-only origin main`
+- [ ] **Step 2:** `git checkout -b fix/restack-field-render-core`
+- [ ] **Step 3:** `git cherry-pick 2dd3ff3` — expected clean.
+- [ ] **Step 4:** `uv sync --all-packages && uvx ruff check . && uv run pytest -q`
+- [ ] **Step 5:** `git push -u origin fix/restack-field-render-core`
+- [ ] **Step 6:** `gh pr create --base main --title "mx-viz: new per-frame field rendering + PyVista 3D surface (issue #62)" --body "..."` with `Closes #62` and a note that this restacks PR #86's work, which merged into a stale base and never reached `main`.
+- [ ] **Step 7:** `gh pr checks --watch` then `gh pr merge --squash --delete-branch`
+
+### Task 1B: Restack issue #63 (Plotly interactive wrapper)
+
+- [ ] **Step 1:** `git checkout main && git pull --ff-only origin main`
+- [ ] **Step 2:** `git checkout -b fix/restack-plotly-interactive`
+- [ ] **Step 3:** `git cherry-pick 670efe9` — expect conflicts in `tools/viz/pyproject.toml` and `uv.lock` only.
+- [ ] **Step 4:** Resolve `tools/viz/pyproject.toml` by keeping **every** entry from both sides — the `[3d]` extra's `pyvista`/`trame`/`trame-vtk`/`trame-vuetify`/`nest-asyncio2`/`imageio` *and* the plotly requirement. PyVista's `export_html` imports the `trame*` packages at call time; dropping them breaks Task 1A's work.
+- [ ] **Step 5:** `git checkout --ours uv.lock && uv lock` — never hand-merge lockfile conflict markers.
+- [ ] **Step 6:** `git add -A && git cherry-pick --continue`
+- [ ] **Step 7:** `uv sync --all-packages && uvx ruff check . && uv run pytest -q`
+- [ ] **Step 8:** Push, `gh pr create --base main` with `Closes #63`, watch checks, squash-merge.
+- [ ] **Step 9:** Close PR #87 with a comment pointing at the replacement PR, since its branch is now obsolete.
+
+### Task 1C: Restack issue #64 (end-to-end PoC rerender)
+
+- [ ] **Step 1:** `git checkout main && git pull --ff-only origin main`
+- [ ] **Step 2:** `git checkout -b fix/restack-poc-rerender`
+- [ ] **Step 3:** `git cherry-pick 25faa10` — expected clean once #62 is on `main`.
+- [ ] **Step 4:** `uv sync --all-packages && uvx ruff check . && uv run pytest -q`
+- [ ] **Step 5:** Push, `gh pr create --base main` with `Closes #64`, watch checks, squash-merge.
+
+After 1A–1C, Task 3's issue-closing steps are mostly redundant — verify
+rather than re-close. Task 3's branch-protection issue is still required,
+and should additionally note that PRs merging into stale non-`main` bases
+went unnoticed for ten days.
+
+---
+
+### Task 1: Merge PR #88 — SUPERSEDED, DO NOT EXECUTE
 
 **Files:** none — GitHub operation only.
 
@@ -61,7 +128,11 @@ Expected: the top commit is PR #88's squash commit, ending in `(#88)`.
 
 ---
 
-### Task 2: Rebase and merge PR #87
+### Task 2: Rebase and merge PR #87 — SUPERSEDED, DO NOT EXECUTE
+
+Superseded by Task 1B above. PR #87's base is not `main`, so rebasing it in
+place would not ship it. Retained for the conflict-resolution detail, which
+Task 1B reuses.
 
 PR #87 is `CONFLICTING`. Conflicts are in `tools/viz/pyproject.toml`, `tools/viz/src/mx_viz/plotly_fields.py`, `tools/viz/tests/test_plotly_fields.py`, and `uv.lock`, caused by PR #86 landing the `[3d]` extra into the same files.
 
