@@ -11,9 +11,12 @@ from pytorch_optimizer import SOAP
 from em_piml.device import resolve_device
 from em_piml.dielectric import PERIOD as DIELECTRIC_PERIOD
 from em_piml.dielectric import analytical_field_dielectric, pde_residual_dielectric
+from em_piml.helmholtz import L as HELMHOLTZ_L
+from em_piml.helmholtz import analytical_mode, anchor_x, helmholtz_residual
 from em_piml.model import (
     CavityPINN,
     FourierCavityPINN,
+    HelmholtzModePINN,
     NeuSACavityPINN,
     PirateNetCavityPINN,
     PseudoSequenceCavityPINN,
@@ -1460,6 +1463,79 @@ def train_dielectric_cavity(
     return _train_dielectric_pinn_adam(
         model, steps, n_collocation, n_boundary, n_initial, lr, device=device
     )
+
+
+def _helmholtz_pinn_loss(
+    model: torch.nn.Module,
+    x_c: torch.Tensor,
+    x_b0: torch.Tensor,
+    x_bl: torch.Tensor,
+    x_anchor: torch.Tensor,
+    mode_order: int,
+) -> torch.Tensor:
+    # Three terms, not four: no time dimension means no initial-condition-derivative analog.
+    # loss_anchor pins amplitude/sign at mode n's first peak (see em_piml.helmholtz.anchor_x) --
+    # without it, E=0 trivially satisfies both loss_pde and loss_bc for any k, the same "free"
+    # degenerate collapse the long-horizon-collapse thread documents (CLAUDE.md).
+    loss_pde = (helmholtz_residual(model, x_c, mode_order) ** 2).mean()
+    loss_bc = (model(x_b0) ** 2).mean() + (model(x_bl) ** 2).mean()
+    loss_anchor = ((model(x_anchor) - analytical_mode(x_anchor, mode_order)) ** 2).mean()
+    return loss_pde + loss_bc + loss_anchor
+
+
+def _train_pinn_adam_helmholtz(
+    model: torch.nn.Module,
+    steps: int,
+    n_collocation: int,
+    lr: float,
+    mode_order: int,
+) -> torch.nn.Module:
+    # x_b0/x_bl/x_anchor are single fixed points (x=0, x=L, and mode n's peak) -- unlike the
+    # time-domain problem's boundary/initial terms, there's no second axis (time) to sample over,
+    # so these need no resampling across steps, only x_c (the PDE-residual collocation set) does.
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    x_b0 = torch.zeros(1, 1)
+    x_bl = torch.full((1, 1), HELMHOLTZ_L)
+    x_anchor = torch.full((1, 1), anchor_x(mode_order))
+
+    for _ in range(steps):
+        optimizer.zero_grad()
+        x_c = torch.rand(n_collocation, 1) * HELMHOLTZ_L
+        loss = _helmholtz_pinn_loss(model, x_c, x_b0, x_bl, x_anchor, mode_order)
+        loss.backward()
+        optimizer.step()
+
+    return model
+
+
+def train_helmholtz_mode(
+    mode_order: int,
+    hidden: int = 64,
+    num_layers: int = 3,
+    steps: int = 2000,
+    seed: int = 0,
+    n_collocation: int = 200,
+    lr: float = 3e-3,
+) -> HelmholtzModePINN:
+    # hidden/num_layers are exposed top-level (unlike most train_* functions here, which hardcode
+    # architecture) because issue #43's whole point is sweeping them per mode_order.
+    torch.manual_seed(seed)
+    model = HelmholtzModePINN(hidden=hidden, num_layers=num_layers)
+    return _train_pinn_adam_helmholtz(model, steps, n_collocation, lr, mode_order)
+
+
+def evaluate_relative_l2_error_helmholtz(
+    model: torch.nn.Module,
+    mode_order: int,
+    seed: int = 123,
+    n_points: int = 500,
+) -> float:
+    torch.manual_seed(seed)
+    x = torch.rand(n_points, 1) * HELMHOLTZ_L
+    with torch.no_grad():
+        predicted = model(x)
+        true = analytical_mode(x, mode_order)
+    return (torch.linalg.norm(predicted - true) / torch.linalg.norm(true)).item()
 
 
 def evaluate_relative_l2_error(

@@ -30,6 +30,20 @@ class CavityPINN(nn.Module):
         return self.net(torch.cat([x, t], dim=-1))
 
 
+class HelmholtzModePINN(nn.Module):
+    """Coordinate-input MLP mapping x -> predicted E(x), for the 1D Helmholtz eigenvalue
+    waveguide-mode problem (issue #43, see em_piml.helmholtz). Same _mlp body shape as
+    CavityPINN, one fewer input dim (no time) -- width/depth are exposed constructor args since
+    the whole point of this problem is to sweep them, unlike CavityPINN's fixed 32x3 shape."""
+
+    def __init__(self, hidden: int = 64, num_layers: int = 3):
+        super().__init__()
+        self.net = _mlp([1] + [hidden] * num_layers + [1])
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
 class FourierCavityPINN(nn.Module):
     """Same MLP body shape as CavityPINN; (x, t) pass through a Fourier feature embedding first."""
 
