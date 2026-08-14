@@ -16,24 +16,15 @@ Two independent findings, not one:
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
-import torch
-from jepa.bouncing_ball import CANVAS_SIZE, generate_dataset
-from jepa.eval import effective_rank, embedding_std, linear_probe_r2
-from jepa.models import PatchEncoder
-from jepa.train import EMBED_DIM, HIDDEN_DIM, PATCH_SIZE, train_jepa
+from jepa.harness import build_encoder, collapse_metrics, probe_r2
+from jepa.train import train_jepa
 
 # train.py's own STEPS default (300) is calibrated for test_train.py's fast collapse-agnostic
 # sanity checks, not for this experiment's collapse comparison -- at 300 steps neither model has
 # trained long enough for the EMA-vs-no-EMA effective_rank gap to appear (see write-up). 3000 is
 # the shortest length at which the gap was reliably observed across seeds 0/1/2.
 COLLAPSE_STEPS = 3000
-
-# Held-out probe splits use master seeds offset well clear of any training-pool seed used in this
-# test/experiment, so a probe frame is never one the encoder was trained on.
-PROBE_TRAIN_SEED_OFFSET = 10_000
-PROBE_TEST_SEED_OFFSET = 20_000
 
 # effective_rank threshold separating full from the no-EMA ablation -- picked with margin inside
 # the observed seed 0/1/2 ranges (full: 2.35-2.79, no_ema: 1.25-1.46) at COLLAPSE_STEPS; not a
@@ -46,76 +37,6 @@ COLLAPSE_RANK_THRESHOLD = 1.8
 # change silently collapsing the online encoder's probe-recoverable signal to ~chance (R^2 <= 0),
 # not an accuracy bar (there isn't a "full beats random_init" bar to clear here -- see below).
 PROBE_R2_FLOOR = 0.05
-
-
-def _probe_frames_and_targets(n: int, seed: int) -> tuple[torch.Tensor, torch.Tensor]:
-    dataset = generate_dataset(n_sequences=n, n_frames=1, master_seed=seed)
-    frames = torch.from_numpy(dataset["frames"][:, 0]).float().unsqueeze(1) / 255.0
-    positions = dataset["positions"][:, 0]
-    velocities = dataset["velocities"][:, 0]
-    targets = torch.from_numpy(np.concatenate([positions, velocities], axis=-1)).float()
-    return frames, targets
-
-
-def _per_patch_embeddings(encoder: PatchEncoder, frames: torch.Tensor) -> torch.Tensor:
-    """Every (frame, patch) pair as its own sample, (N * num_patches, embed_dim) -- the direct
-    "do patch representations vary meaningfully" collapse question, not diluted by averaging
-    content-bearing patches against the ~55/64 pure-background patches this task's frames have
-    (mean-pooling was tried first and found to wash out the signal almost entirely -- see
-    write-up)."""
-    with torch.no_grad():
-        tokens = encoder(frames)
-    return tokens.reshape(-1, tokens.shape[-1])
-
-
-def _flattened_embeddings(encoder: PatchEncoder, frames: torch.Tensor) -> torch.Tensor:
-    """Every patch embedding concatenated per frame, (N, num_patches * embed_dim) -- preserves
-    spatial position (unlike mean-pooling) for the linear probe. Needs a probe train set well
-    above this dimensionality (num_patches * embed_dim = 2048 here) to avoid the OLS
-    overdetermined-regime overfitting this task's D>>N small-sample regime showed early on (see
-    write-up)."""
-    with torch.no_grad():
-        tokens = encoder(frames)
-    return tokens.reshape(tokens.shape[0], -1)
-
-
-def collapse_metrics(encoder: PatchEncoder, seed: int, n_test: int = 300) -> dict[str, float]:
-    frames, _ = _probe_frames_and_targets(n_test, seed + PROBE_TEST_SEED_OFFSET)
-    embeddings = _per_patch_embeddings(encoder, frames)
-    return {
-        "embedding_std": embedding_std(embeddings),
-        "effective_rank": effective_rank(embeddings),
-    }
-
-
-def probe_r2(
-    encoder: PatchEncoder, seed: int, n_train: int = 4000, n_test: int = 300
-) -> float:
-    train_frames, train_targets = _probe_frames_and_targets(n_train, seed + PROBE_TRAIN_SEED_OFFSET)
-    test_frames, test_targets = _probe_frames_and_targets(n_test, seed + PROBE_TEST_SEED_OFFSET)
-    train_embeddings = _flattened_embeddings(encoder, train_frames)
-    test_embeddings = _flattened_embeddings(encoder, test_frames)
-    return linear_probe_r2(train_embeddings, train_targets, test_embeddings, test_targets)
-
-
-def build_encoder(variant: str, seed: int, steps: int = COLLAPSE_STEPS) -> PatchEncoder:
-    """variant: "full" (EMA target), "no_ema" (gradient-trained target, issue #69's ablation), or
-    "random_init" (untrained encoder, no train_jepa call at all)."""
-    if variant == "full":
-        encoder, _, _ = train_jepa(steps=steps, seed=seed, use_ema=True)
-    elif variant == "no_ema":
-        encoder, _, _ = train_jepa(steps=steps, seed=seed, use_ema=False)
-    elif variant == "random_init":
-        torch.manual_seed(seed)
-        encoder = PatchEncoder(
-            image_size=CANVAS_SIZE,
-            patch_size=PATCH_SIZE,
-            embed_dim=EMBED_DIM,
-            hidden_dim=HIDDEN_DIM,
-        )
-    else:
-        raise ValueError(f"unknown variant {variant!r}")
-    return encoder
 
 
 @pytest.mark.slow
@@ -151,9 +72,9 @@ def test_full_model_avoids_collapse_and_does_not_reliably_beat_random_init_probe
     hypothesis. See ../experiments/001-baseline-collapse-avoidance.md for the full write-up and
     the observed per-seed numbers this locks in."""
     for seed in (0, 1, 2):
-        full_encoder = build_encoder("full", seed)
-        no_ema_encoder = build_encoder("no_ema", seed)
-        random_encoder = build_encoder("random_init", seed)
+        full_encoder = build_encoder("full", seed, steps=COLLAPSE_STEPS)
+        no_ema_encoder = build_encoder("no_ema", seed, steps=COLLAPSE_STEPS)
+        random_encoder = build_encoder("random_init", seed, steps=COLLAPSE_STEPS)
 
         full_collapse = collapse_metrics(full_encoder, seed)
         no_ema_collapse = collapse_metrics(no_ema_encoder, seed)
