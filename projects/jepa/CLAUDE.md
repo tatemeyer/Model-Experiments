@@ -84,11 +84,26 @@ experiment logs" entry) — it does not grow a new section per issue.
 
 ## Experiment index
 
-No experiments recorded yet — Slice 1 (issues #65-#69) is in progress
-and hasn't produced a result to write up.
+Verdict key: ✅ helped · ⚠️ partial/modest · ❌ no effect · 🔻 actively worse.
+
+**Slice 1 — baseline**
+
+| issue | question | verdict | where |
+|---|---|---|---|
+| #69 | Does the full EMA-target JEPA avoid collapse (vs. a no-EMA ablation) and out-probe a random-init baseline? | ⚠️ partial — collapse-avoidance confirmed via `effective_rank` (not `embedding_std`), probe-R² hypothesis not confirmed | `experiments/001-baseline-collapse-avoidance.md` |
 
 ## Open leads
 
+- Slice 2 (EMA momentum / masking ratio / predictor depth sweep) should
+  vary `ema_momentum` and `steps` jointly — issue #69 found the
+  collapse-avoidance gap needs ~3000 steps to appear at momentum 0.996,
+  suggesting a momentum schedule tuned to training length (as BYOL uses)
+  could reveal it far more cheaply.
+- Issue #69's probe-R² negative result (full model doesn't reliably
+  out-probe a random-init encoder) may be an artifact of `PatchEncoder`'s
+  shallow architecture rather than a real JEPA-training limitation — worth
+  re-testing against a deeper encoder before concluding training doesn't
+  help position-decodability here.
 - Arcs 2-4 above are the standing backlog once Arc 1 lands a finding.
 - A repo-wide spec/plan conventions overhaul is in flight (separate
   effort) that may formalize where Arc/Slice work like this is tracked
