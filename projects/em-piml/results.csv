@@ -154,3 +154,4 @@ issue,experiment_slug,variant,seed,metric,value,params,date
 41,041-piratenets,piratenets_paper_scale,1,relative_l2,0.7195,"{""num_blocks"":4,""steps"":4000,""fourier_scale"":1.0,""hidden"":64}",2026-08-02
 41,041-piratenets,piratenets_paper_scale,2,relative_l2,0.7156,"{""num_blocks"":4,""steps"":4000,""fourier_scale"":1.0,""hidden"":64}",2026-08-02
 41,041-piratenets,piratenets_paper_scale,7,relative_l2,0.7231,"{""num_blocks"":4,""steps"":4000,""fourier_scale"":1.0,""hidden"":64}",2026-08-02
+64,064-field-persist-render-poc,baseline_reloaded_artifact,0,relative_l2,0.0265,"{}",2026-08-03
