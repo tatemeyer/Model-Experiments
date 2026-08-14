@@ -332,3 +332,26 @@ root-file-triggers-fallback) plus a direct `uv run pytest --collect-only`
 scoped to `projects/em-piml` confirming only its 19 slow tests are
 selected. Live end-to-end confirmation of the scoped path is the first
 project-only PR opened after this merges.
+
+## 2026-08-14 — Minimum Python is 3.12
+
+Every workspace package declares `requires-python = ">=3.12"`
+(`projects/em-piml`, `projects/jepa`, `tools/datasets`, `tools/viz`), and
+the root `pyproject.toml`'s ruff config targets `py312`.
+
+Why: `numpy` 2.5+ requires Python >= 3.12. While the workspace still
+declared `>=3.11`, uv could not produce a resolution covering the whole
+declared range, and Dependabot failed **every** update with
+`dependency_file_not_resolvable` — not just numpy's. The error names numpy
+because that is the package it tried to bump, but the blocker was the
+`requires-python` floor, so no dependency could be updated at all. That
+went unnoticed from 2026-08-11 until the 2026-08-14 runway-clearing pass.
+
+Nothing in this repo was actually exercising 3.11: the development venv
+runs 3.14, and CI pins no version matrix (it installs whatever
+`astral-sh/setup-uv` resolves against `requires-python`). Raising the floor
+therefore costs nothing here and unblocks dependency updates permanently.
+
+Revisit only if this repo ever needs to run somewhere that caps Python at
+3.11 — in which case the fix is pinning `numpy<2.5`, not lowering the floor
+back blindly.

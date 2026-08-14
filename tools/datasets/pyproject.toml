@@ -2,7 +2,7 @@
 name = "mx-datasets"
 version = "0.1.0"
 description = "Repo-wide dataset registry, fetch, and verification CLI for Model-Experiments"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]
