@@ -828,3 +828,56 @@ gh issue view <N> --json state --jq .state     # expect: CLOSED
 uv run pytest -q                                # expect: green
 git log --oneline -3
 ```
+
+---
+
+## Outcome (2026-08-14)
+
+**All seven tasks complete. The finding is the opposite of what the plan predicted.**
+
+### Result
+
+There is **no collapse boundary at the low-momentum end**. `effective_rank` at
+6000 steps is a flat, healthy plateau from momentum 0.0 through 0.999
+(3.15–4.03 across seeds); collapse appears only at 0.9999 (1.88–2.00, *below*
+random init's 2.44–2.93), and the `use_ema=False` control is worst (1.18–1.39).
+Three regimes, no seed overlap between any of them.
+
+**Stop-gradient, not EMA smoothing, is what prevents collapse.** Momentum 0.0
+keeps the stop-gradient with zero smoothing and is the *best* cell;
+`use_ema=False` removes it and is the worst.
+
+Task 6's drafted test — asserting momentum 0.996 beats 0.0 — would have been
+**false**. The plan's instruction to "assert the relationship that is actually
+true rather than the one I guessed" is what saved it. The shipped test asserts
+the high-momentum boundary instead, plus the degenerate-loss signature.
+
+### Corrections forced during execution
+
+1. **The determinism assumption was wrong** (see Task 2's outcome note):
+   `Predictor`'s `TransformerEncoderLayer` stack has six `Dropout` modules at
+   `p=0.1` sampling from the global RNG. Fixed with an RNG save/restore guard
+   rather than the plan's 4×-cost fallback. Had the gate not existed, every
+   number in the sweep would have been silently corrupted by the act of
+   measuring it.
+2. **`linear_probe_r2` is nondeterministic** — `torch.linalg.lstsq` returned
+   different values on bit-identical inputs (0.9761533737 ×3, 0.9763703942 ×1)
+   for the ill-conditioned 4000×2049 system, and much worse at smaller
+   `n_train`. Discovered while investigating an apparent refactor mismatch;
+   pre-existing, and independently justifies excluding probe R² from this slice.
+3. **A literature attribution was wrong in the first draft.** The write-up
+   credited "BYOL-family" for the stop-gradient-is-what-matters result; that is
+   **SimSiam** (arXiv:2011.10566). BYOL's own τ=0 ablation points the *other*
+   way (18.8% vs 72.5% on ImageNet), which is a genuine disagreement with this
+   slice's result and is now recorded as such rather than smoothed over.
+
+### Infrastructure note
+
+Background jobs in this environment are killed after roughly 18 minutes, and
+the foreground tool cap is 10 minutes — while a single 6000-step cell takes
+~9.3 minutes. The sweep therefore needed **ten relaunch cycles**. The
+disk-checkpointing added before launching meant zero lost work across all of
+them; without it this would have been unrunnable. An interrupted-then-rerun
+cell also produced **bit-identical** duplicate rows, which incidentally
+confirmed determinism across process boundaries. 22 duplicate keys were
+deduplicated before analysis (109 raw rows → 87, the exact expected count).
