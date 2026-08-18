@@ -1094,7 +1094,7 @@ requires-dist = [
     { name = "plotly", marker = "extra == '3d'", specifier = ">=5.24" },
     { name = "pyvista", marker = "extra == '3d'", specifier = ">=0.45" },
     { name = "trame", marker = "extra == '3d'", specifier = ">=3" },
-    { name = "trame-vtk", marker = "extra == '3d'", specifier = ">=2" },
+    { name = "trame-vtk", marker = "extra == '3d'", specifier = ">=2.11.16" },
     { name = "trame-vuetify", marker = "extra == '3d'", specifier = ">=2" },
 ]
 provides-extras = ["3d"]
@@ -1847,14 +1847,14 @@ wheels = [
 
 [[package]]
 name = "trame-vtk"
-version = "2.11.15"
+version = "2.11.16"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "trame-client" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0a/17/e4f82f0ca04d7d41c4de771fd07f9e1dfc3df0074ec78c2f139b0f3aded1/trame_vtk-2.11.15.tar.gz", hash = "sha256:b35386f8533463c27fa2db19616d38ab8cb28cc855013360c1f08c2d314ea71b", size = 829776, upload-time = "2026-07-28T18:26:24.381Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6a/14/497d520a7a0d177e47a3624bcf200657b3c353fe1936a36bdc4ef360dcba/trame_vtk-2.11.16.tar.gz", hash = "sha256:9525a05cfd135794a72e4267521fd4b3b47ed929d52e03b5465a1579e469d9a7", size = 829781, upload-time = "2026-08-14T11:30:30.376Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8e/9c/7b65678d4b3a59affa2e9fb9cacea1ca5ec28912d0ba3871d7c0c5af635f/trame_vtk-2.11.15-py3-none-any.whl", hash = "sha256:61e0f1a21fc6f1282ac7baf65c90198b3ccc9ad11efb383d17255d90ed8d8606", size = 851806, upload-time = "2026-07-28T18:26:22.641Z" },
+    { url = "https://files.pythonhosted.org/packages/b6/7b/fe6c5674facfe47c23e7b77fc72df893b9e145ca04396ce8769a8d170dbd/trame_vtk-2.11.16-py3-none-any.whl", hash = "sha256:2b5eadaf152d1cc59604f1a5e7cabab933a79bb4f889cf15eecec8db0cc8721d", size = 851994, upload-time = "2026-08-14T11:30:28.433Z" },
 ]
 
 [[package]]

@@ -22,7 +22,7 @@ dependencies = ["matplotlib>=3.8", "numpy>=1.26"]
     "pyvista>=0.45",
     "plotly>=5.24",
     "trame>=3",
-    "trame-vtk>=2",
+    "trame-vtk>=2.11.16",
     "trame-vuetify>=2",
     "nest-asyncio2>=1.7.2",
     "imageio>=2.34",
