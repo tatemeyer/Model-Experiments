@@ -3,7 +3,7 @@ name = "mx-viz"
 version = "0.1.0"
 description = "Repo-wide plotting toolkit for visualizing research experiments and results"
 requires-python = ">=3.12"
-dependencies = ["matplotlib>=3.8", "numpy>=1.26"]
+dependencies = ["matplotlib>=3.8", "numpy>=2.5.2"]
 
 [project.optional-dependencies]
 # field-visualization Arc, Slice 1 (issue #58): PyVista + Plotly, together -- both are needed by
