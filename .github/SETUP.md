@@ -93,6 +93,27 @@ Repo → Settings → Rules → Rulesets → New ruleset, four of them:
 
 - Restrict deletions — on (protects in-progress work from an accidental
   delete while a PR is still open)
+> **Open decision (issue #94): this deletion rule defeats
+> `delete_branch_on_merge`.** That repo setting is enabled, but this rule
+> forbids deleting `feat/**`/`fix/**`/`docs/**`/`chore/**`/`experiment/**`,
+> so merged branches cannot be pruned (~50 outstanding) and
+> `gh pr merge --delete-branch` reports "Cannot delete this branch".
+> The rule's stated intent below — protecting an in-progress branch from an
+> accidental delete — is real, but GitHub already offers one-click branch
+> restore from the PR page, and leftover *merged* branches are precisely what
+> stacked PRs accidentally target. Recommendation: drop this ruleset. It has
+> exactly one rule, so removing the rule leaves nothing behind:
+>
+> ```
+> gh api -X DELETE repos/tatemeyer/Model-Experiments/rulesets/18951955
+> ```
+>
+> To restore it later, recreate a branch ruleset named `feature-branches`
+> targeting those five patterns with a single `deletion` rule and no bypass
+> actors. The conservative alternative is to keep the rule and add a narrow
+> bypass actor for cleanup only — but the bypass list is deliberately empty
+> repo-wide, so that trades one documented invariant for another.
+
 - Nothing else — these are short-lived, single-author branches;
   over-constraining them (blocking force-push, requiring checks) adds
   friction with no real safety benefit here. Claude Code sessions in

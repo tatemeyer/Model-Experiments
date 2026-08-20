@@ -27,7 +27,13 @@ https://danielmiessler.com/blog/intent-engineering).
 4. **Merge.** Issues/PRs labeled `autonomy:safe` auto-merge once CI is
    green (see `.github/workflows/auto-merge.yml`). Anything riskier
    (`autonomy:review`) waits for explicit human approval. Nothing merges
-   with red CI, regardless of label.
+   with red CI, regardless of label. **Always open PRs against `main`** —
+   a PR stacked on another branch strands its own work when the parent
+   squash-merges, and displays as MERGED while doing so. This has
+   happened four times across these repos; `.github/workflows/branch-hygiene.yml`
+   now guards it, and `docs/branch-hygiene.md` explains the failure and
+   the recovery rule (re-create from `main` and cherry-pick — never
+   rebase a child whose parent squashed).
 5. **Insights.** GitHub's Insights/Pulse and Projects views are the
    feedback signal for the experiment itself: are well-specified intents
    (clear outcome + verification) actually completing autonomously more
