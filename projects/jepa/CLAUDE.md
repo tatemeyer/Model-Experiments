@@ -99,7 +99,13 @@ Verdict key: ✅ helped · ⚠️ partial/modest · ❌ no effect · 🔻 active
 
 | issue | question | verdict | where |
 |---|---|---|---|
-| #69 | Does the full EMA-target JEPA avoid collapse (vs. a no-EMA ablation) and out-probe a random-init baseline? | ⚠️ partial — collapse-avoidance confirmed via `effective_rank` (not `embedding_std`), probe-R² hypothesis not confirmed | `experiments/001-baseline-collapse-avoidance.md` |
+| #69 | Does the full EMA-target JEPA avoid collapse (vs. a no-EMA ablation) and out-probe a random-init baseline? | ⚠️ partial — collapse-avoidance confirmed via `effective_rank` (not `embedding_std`), probe-R² hypothesis not confirmed. **Probe numbers superseded by #104**; the collapse half is unaffected | `experiments/001-baseline-collapse-avoidance.md` |
+
+**Methodology corrections**
+
+| issue | question | verdict | where |
+|---|---|---|---|
+| #104 | Were this project's probe-R² numbers measuring the encoder, or the solver? | 🔻 the solver — `lstsq`'s float32 rank cut discarded most of the signal, non-reproducibly. Corrected: all variants tie at 0.9763–0.9773 because **the probe is saturated (untrained encoder already at x/y R²=0.9998) and ~97.8% position by variance — total headroom ~0.001** | `experiments/003-probe-solver-correctness.md` |
 
 **Slice 2 — collapse boundary**
 
@@ -126,16 +132,31 @@ Verdict key: ✅ helped · ⚠️ partial/modest · ❌ no effect · 🔻 active
   jumps an order of magnitude in target staleness across the only
   interval where behaviour changes, so whether the transition is sharp or
   gradual is unknown.
-- `linear_probe_r2` is **nondeterministic** on this data:
-  `torch.linalg.lstsq` returned different values on bit-identical inputs
-  for the ill-conditioned 4000×2049 system (0.9761533737 three times,
-  0.9763703942 once), and far worse at smaller `n_train`. Any future
-  probe work needs this addressed before its numbers can be trusted.
-- Issue #69's probe-R² negative result (full model doesn't reliably
-  out-probe a random-init encoder) may be an artifact of `PatchEncoder`'s
-  shallow architecture rather than a real JEPA-training limitation — worth
-  re-testing against a deeper encoder before concluding training doesn't
-  help position-decodability here.
+- ~~`linear_probe_r2` is **nondeterministic** on this data.~~ Fixed in
+  issue #104. The nondeterminism was the mild symptom: `lstsq`'s default
+  driver was rank-truncating a float32 ill-conditioned system and
+  returning fits 15–40× worse than attainable on their own objective. The
+  probe now runs in float64 with an explicitly regularized (ridge) fit.
+  See `003-probe-solver-correctness.md`.
+- **The probe task itself is now the blocker, not the probe code.**
+  Pooled probe R² is ~97.8% position by target variance, and an
+  *untrained* encoder already scores x/y R² = 0.9998, so the whole
+  measurable range for a training effect is ~0.001. Velocity is
+  structurally unrecoverable (single-frame samples; R² < 0 for every
+  variant) and carries only 2.2% of the variance. **Arc 2 is specified
+  around downstream-probe sample-efficiency and cannot produce a
+  meaningful result until this is fixed** — needs multi-frame inputs,
+  per-dimension or standardized-target scoring, and a task a random
+  projection doesn't already solve.
+- Probe R² is **not a collapse detector** here: `no_ema` sits at
+  effective_rank 1.25–1.46 (dimensionally collapsed) and still probes at
+  0.977, identical to the healthy model. `effective_rank` should stay
+  Arc 1's primary metric.
+- ~~Issue #69's probe-R² negative result may be an artifact of
+  `PatchEncoder`'s shallow architecture — worth re-testing against a
+  deeper encoder.~~ Much weaker motivation after #104: the shallow
+  encoder isn't what limits the score, the ceiling is. Change the task
+  before the architecture.
 - Arcs 2-4 above are the standing backlog once Arc 1 lands a finding.
 - A repo-wide spec/plan conventions overhaul is in flight (separate
   effort) that may formalize where Arc/Slice work like this is tracked

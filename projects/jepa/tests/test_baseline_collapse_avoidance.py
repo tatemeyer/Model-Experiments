@@ -9,9 +9,15 @@ Two independent findings, not one:
    project's STEPS=300 default is too short for the gap to appear) and only for effective_rank,
    not embedding_std (which does not reliably separate the two -- see the write-up).
 2. Linear-probe R^2 (does *not* confirm the issue's hypothesis): the full model's held-out
-   position/velocity probe R^2 is not reliably higher than a random-init-encoder baseline's, at
-   this toy architecture's scale -- documented as a negative result, not asserted as a threshold
-   crossing that doesn't actually happen.
+   position/velocity probe R^2 is not higher than a random-init-encoder baseline's, at this toy
+   architecture's scale -- documented as a negative result, not asserted as a threshold crossing
+   that doesn't actually happen.
+
+   **Amended by issue #104.** The per-seed probe numbers this originally locked in (0.10-0.98,
+   scattered) were produced by a broken least-squares solver and are not real. The negative
+   result survives the correction, but its shape changed completely: all three variants score
+   0.9763-0.9773, indistinguishable, because the probe is saturated rather than noisy. See
+   ../experiments/003-probe-solver-correctness.md.
 """
 
 from __future__ import annotations
@@ -32,11 +38,12 @@ COLLAPSE_STEPS = 3000
 # it does not reliably separate the two variants (see write-up's mechanistic diagnosis).
 COLLAPSE_RANK_THRESHOLD = 1.8
 
-# Regression floor for the probe-R^2 negative result -- observed seed 0/1/2 range for both full
-# and random_init is 0.10-0.98 (see write-up's results table); this just guards against a future
-# change silently collapsing the online encoder's probe-recoverable signal to ~chance (R^2 <= 0),
-# not an accuracy bar (there isn't a "full beats random_init" bar to clear here -- see below).
-PROBE_R2_FLOOR = 0.05
+# Regression floor for the probe-R^2 result. Was 0.05 against an observed 0.10-0.98 range; issue
+# #104 showed that range was an artifact of a broken least-squares solver, and under the corrected
+# probe every variant lands in 0.9763-0.9773 (see experiments/003-probe-solver-correctness.md).
+# 0.95 is therefore a real regression guard rather than a near-vacuous one -- it would have caught
+# the #104 defect on its own, which 0.05 did not.
+PROBE_R2_FLOOR = 0.95
 
 
 @pytest.mark.slow
@@ -89,8 +96,10 @@ def test_full_model_avoids_collapse_and_does_not_reliably_beat_random_init_probe
 
         full_r2 = probe_r2(full_encoder, seed)
         random_r2 = probe_r2(random_encoder, seed)
-        # Not asserting full_r2 > random_r2 -- that's the issue's hypothesis, and it does not
-        # hold reproducibly (see write-up). Both just need to stay above chance-level R^2.
+        # Still not asserting full_r2 > random_r2, but for a sharper reason than the original
+        # write-up had: under the corrected probe (issue #104) the two are not merely unordered,
+        # they are equal to ~1e-3 because the probe is *saturated* -- an untrained encoder already
+        # scores 0.9767. There is no headroom for training to win, so this stays a floor check.
         assert full_r2 > PROBE_R2_FLOOR, f"seed {seed}: full model probe_r2 {full_r2:.4f} too low"
         assert random_r2 > PROBE_R2_FLOOR, (
             f"seed {seed}: random_init probe_r2 {random_r2:.4f} too low"
