@@ -397,3 +397,52 @@ See `projects/jepa/src/jepa/eval.py` for the reference implementation and
 `projects/jepa/tests/test_eval.py` for the three properties worth
 asserting (reproducibility, thread-count stability, and that the fit
 actually reaches the least-squares optimum).
+
+## 2026-08-20 — Dependencies: torch's wheel index is platform-split, and pinned
+
+`torch` resolves from **PyTorch's CUDA wheel index on `win32`** and from
+plain PyPI everywhere else, declared in the root `pyproject.toml`:
+
+```toml
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu126", marker = "sys_platform == 'win32'" }]
+```
+
+Why: the PyPI **Windows** torch wheel ships no CUDA runtime — all of its
+CUDA dependencies carry `sys_platform == 'linux'` markers — so a default
+resolve leaves `torch.cuda.is_available()` False on a Windows machine
+with a working GPU and driver. The GPU named in this file's "Compute
+assumption" entry was unusable for packaging reasons alone until issue
+#60.
+
+Two rules go with it, both load-bearing:
+
+1. **`explicit = true` is required on the index.** It restricts the index
+   to packages that name it in `[tool.uv.sources]` instead of letting it
+   serve as a general fallback for the whole workspace. An unpinned
+   second package index is a supply-chain surface across every
+   dependency — the same concern that makes this repo SHA-pin
+   third-party GitHub Actions.
+2. **Platform markers are required on the source.** An unscoped entry
+   re-sources torch for CI's `ubuntu-latest` runner too. When changing
+   any of this, verify the claim on the `uv.lock` diff rather than
+   asserting it: for issue #60 the only lines removed from the PyPI
+   `torch` block were its four `win_amd64` wheels, leaving every
+   Linux/macOS wheel URL, hash, and dependency line byte-identical.
+
+Prefer the CUDA build that already ships a wheel for the **torch version
+currently locked**, so the change swaps build variant without bumping
+version (cu126 for torch 2.13.0/cp313 at the time of writing). Any change
+here carries `autonomy:review`, never `autonomy:safe` — a lock/index diff
+is treated like a CI-workflow diff.
+
+Consequence worth knowing before designing an experiment: **CPU and GPU
+results are not seed-comparable.** `torch.Generator` is device-bound, so
+the same seed draws a different sequence on each, and a variant swept
+across devices confounds device with RNG stream. Record the device in
+`results.csv`'s `params` column (issue #60 establishes this).
