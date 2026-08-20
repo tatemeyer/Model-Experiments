@@ -1,0 +1,15 @@
+# Merged PRs whose merge commit is legitimately not an ancestor of the default branch, verified
+# by hand. Read by .github/scripts/branch_hygiene.sh (issue #94).
+#
+# Only Check B findings belong here. A Check A finding -- an *open* PR targeting a non-default
+# base -- should be retargeted, not allowlisted; there is no benign version of that state.
+#
+# Format: "#<pr>  <reason>". Add an entry only after confirming on the default branch that the
+# work actually shipped -- the whole point of the guard is that "PR says merged" is not evidence.
+
+#26   Stacked on feat/em-piml-two-mode-superposition, which squash-merged to main and carried
+#     this content with it. Verified 2026-08-20: num_bands_sweep.py and test_num_bands_sweep.py
+#     are both present on main.
+#86   Stacked on feat/em-piml-field-array-persistence. Content re-landed via #91.
+#88   Stacked on feat/em-piml-field-render-core. Content re-landed via #93 (see main's history:
+#     "em-piml: end-to-end proof that field-persist -> mx-viz-render works (issue #64) (#88) (#93)").
