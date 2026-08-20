@@ -27,6 +27,12 @@ Claude Code sessions follow in this repo, and
   representation collapse at toy scale, using a procedurally generated
   bouncing-ball environment with exact closed-form ground truth for
   linear-probe evaluation.
+- [`projects/nemotron-asr/`](./projects/nemotron-asr/) — CPU-only speech
+  recognition with NVIDIA Nemotron 3.5 ASR (0.6B cache-aware
+  FastConformer-RNNT), evaluated as a dictation front-end for `TTUI` and
+  `Parallax`. An integration study rather than a training study: measures
+  real-time factor and WER on the target CPU instead of trusting vendor
+  GPU benchmarks.
 
 ## Layout
 

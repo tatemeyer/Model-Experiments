@@ -1,0 +1,20 @@
+# Literature registry
+
+Every paper, model card, or runtime this project has drawn on or tested. Check
+here before re-proposing something as a "new" lead — if it is already **Tried**,
+the verdict explains what happened. Add a row whenever an experiment cites
+something new; see `../em-piml/experiments/TEMPLATE.md`.
+
+Note this project's registry carries runtimes and model cards alongside papers,
+because its research question is integration feasibility rather than a training
+method — the artifacts that decide the outcome here are implementations.
+
+| Paper / artifact | Link | Cited or tried in | Verdict | Notes |
+|---|---|---|---|---|
+| Noroozi et al., "Stateful Conformer with Cache-based Inference for Streaming ASR" | [arXiv:2312.17279](https://arxiv.org/abs/2312.17279) | 001 (project motivation) | 📖 Foundational, mechanism relied on but not itself tested | The cache-aware streaming mechanism that makes this checkpoint viable in an event loop: encoder self-attention/conv caches persist across chunks, so each frame is processed exactly once and there are no overlapping recomputations. Also the source of the runtime-selectable `att_context_size` operating points (80ms–1.12s from one set of weights). |
+| Rekesh et al., "Fast Conformer with Linearly Scalable Attention for Efficient Speech Recognition" | [arXiv:2305.05084](https://arxiv.org/abs/2305.05084) | 001 (project motivation) | 📖 Foundational, mechanism relied on but not itself tested | The encoder backbone: 8x depthwise subsampling cuts the sequence length the attention stack sees, which is most of why a 600M-param model reaches 2.4x realtime on a single 2018 CPU core. Confirmed in the loaded model's own metadata (`subsampling x8, ch=256`, `d_model 1024 / 24 layers / 8 heads`). |
+| NVIDIA, `nemotron-3.5-asr-streaming-0.6b` model card | [HF](https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b) | 001 | ⚠️ Partially contradicted on the CPU question | Claims 40 locales, native PnC, OpenMDW-1.1 (commercial OK) — the accuracy/PnC claims held on English. But it lists only NVIDIA GPU architectures as supported hardware and states CPU inference is not explicitly supported. 001 shows CPU is not merely possible but comfortable, via ggml rather than NVIDIA's own Python stack. The card's throughput figures are all H100 concurrency and answer a different question than single-stream latency. |
+| `mudler/parakeet.cpp` — C++17/ggml inference engine | [GitHub](https://github.com/mudler/parakeet.cpp) | 001 | ✅ Works; the sanctioned CPU path for this project | MIT. v0.5.0 prebuilt Windows x64 CPU bundle (1.4MB CLI, 0.7MB C-API lib) transcribed this checkpoint correctly with no build step. Flat C-API with a `stream_begin/feed/drain_events/finalize` shape suited to a TUI loop. Claims WER-0 parity with NeMo on published checkpoints; not independently verified here. |
+| `mudler/parakeet-cpp-gguf` — converted GGUF collection | [HF](https://huggingface.co/mudler/parakeet-cpp-gguf) | 001 | ✅ Required — this is where the GGUFs must come from | f16/q8_0/q6_k/q5_k/q4_k conversions. **Not interchangeable with the GGUF in NVIDIA's own model repo.** q8_0 here is 984MB; NVIDIA's same-named q8_0 is 742MB and fails to load. |
+| NVIDIA NeMo-Speech.cpp | [GitHub](https://github.com/NVIDIA-NeMo/Speech) | 001 | ❌ Not tried — but is the reason the NVIDIA GGUF fails | NVIDIA's own C++ runtime; the `.q8_0.gguf` added to the model repo on 2026-08-05 targets it. Untested here because parakeet.cpp already worked and ships Windows CPU binaries. Worth revisiting only if it turns out to be faster or to track NVIDIA checkpoints sooner. |
+| NVIDIA, "How to Fine-Tune Nemotron 3.5 ASR for Your Language, Domain, or Accent" | [HF blog](https://huggingface.co/blog/nvidia/fine-tuning-nemotron-35-asr) | 001 (lead 3) | 📖 Not yet tried — the fallback for the jargon problem | Directly addresses 001's only real failure mode (unseen project proper nouns like `ttui`). Held as the expensive fallback: try a post-correction map over the enumerable jargon list first. |

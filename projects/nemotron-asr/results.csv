@@ -1,0 +1,18 @@
+issue,experiment_slug,variant,seed,metric,value,params,date
+,001-cpu-feasibility,q8_0-t1,0,rtf,0.409,"{""quant"":""q8_0"",""threads"":1,""clip"":""long"",""audio_s"":17.43,""wall_s"":7.13,""cpu"":""i7-9700K""}",2026-08-19
+,001-cpu-feasibility,q8_0-t2,0,rtf,0.230,"{""quant"":""q8_0"",""threads"":2,""clip"":""long"",""audio_s"":17.43,""wall_s"":4.00,""cpu"":""i7-9700K""}",2026-08-19
+,001-cpu-feasibility,q8_0-t4,0,rtf,0.143,"{""quant"":""q8_0"",""threads"":4,""clip"":""long"",""audio_s"":17.43,""wall_s"":2.49,""cpu"":""i7-9700K""}",2026-08-19
+,001-cpu-feasibility,q8_0-t8,0,rtf,0.131,"{""quant"":""q8_0"",""threads"":8,""clip"":""long"",""audio_s"":17.43,""wall_s"":2.29,""cpu"":""i7-9700K""}",2026-08-19
+,001-cpu-feasibility,q4_k-t1,0,rtf,0.456,"{""quant"":""q4_k"",""threads"":1,""clip"":""long"",""audio_s"":17.43,""wall_s"":7.95,""cpu"":""i7-9700K""}",2026-08-19
+,001-cpu-feasibility,q4_k-t2,0,rtf,0.250,"{""quant"":""q4_k"",""threads"":2,""clip"":""long"",""audio_s"":17.43,""wall_s"":4.36,""cpu"":""i7-9700K""}",2026-08-19
+,001-cpu-feasibility,q4_k-t4,0,rtf,0.149,"{""quant"":""q4_k"",""threads"":4,""clip"":""long"",""audio_s"":17.43,""wall_s"":2.60,""cpu"":""i7-9700K""}",2026-08-19
+,001-cpu-feasibility,q4_k-t8,0,rtf,0.114,"{""quant"":""q4_k"",""threads"":8,""clip"":""long"",""audio_s"":17.43,""wall_s"":1.99,""cpu"":""i7-9700K""}",2026-08-19
+,001-cpu-feasibility,q8_0-t8,0,wer_pct,0.0,"{""quant"":""q8_0"",""threads"":8,""clip"":""short"",""audio_s"":6.16,""ref_words"":15,""audio_source"":""sapi_tts""}",2026-08-19
+,001-cpu-feasibility,q8_0-t8,0,wer_pct,5.9,"{""quant"":""q8_0"",""threads"":8,""clip"":""code"",""audio_s"":6.93,""ref_words"":17,""audio_source"":""sapi_tts""}",2026-08-19
+,001-cpu-feasibility,q8_0-t8,0,wer_pct,0.0,"{""quant"":""q8_0"",""threads"":8,""clip"":""long"",""audio_s"":17.43,""ref_words"":45,""audio_source"":""sapi_tts""}",2026-08-19
+,001-cpu-feasibility,q4_k-t8,0,wer_pct,0.0,"{""quant"":""q4_k"",""threads"":8,""clip"":""short"",""audio_s"":6.16,""ref_words"":15,""audio_source"":""sapi_tts""}",2026-08-19
+,001-cpu-feasibility,q4_k-t8,0,wer_pct,11.8,"{""quant"":""q4_k"",""threads"":8,""clip"":""code"",""audio_s"":6.93,""ref_words"":17,""audio_source"":""sapi_tts""}",2026-08-19
+,001-cpu-feasibility,q4_k-t8,0,wer_pct,0.0,"{""quant"":""q4_k"",""threads"":8,""clip"":""long"",""audio_s"":17.43,""ref_words"":45,""audio_source"":""sapi_tts""}",2026-08-19
+,001-cpu-feasibility,q8_0,0,load_s,0.33,"{""quant"":""q8_0"",""file_mb"":984,""runtime"":""parakeet-cli-0.5.0-win-cpu""}",2026-08-19
+,001-cpu-feasibility,q4_k,0,load_s,0.24,"{""quant"":""q4_k"",""file_mb"":718,""runtime"":""parakeet-cli-0.5.0-win-cpu""}",2026-08-19
+,001-cpu-feasibility,nvidia-q8_0,0,load_ok,0,"{""quant"":""q8_0"",""file_mb"":742,""source"":""nvidia_model_repo"",""note"":""NeMo-Speech.cpp GGUF dialect; fails in parakeet.cpp""}",2026-08-19
