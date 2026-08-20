@@ -355,3 +355,45 @@ therefore costs nothing here and unblocks dependency updates permanently.
 Revisit only if this repo ever needs to run somewhere that caps Python at
 3.11 — in which case the fix is pinning `numpy<2.5`, not lowering the floor
 back blindly.
+
+## 2026-08-20 — Numerics: metric code fits in float64, and never trusts a solver's rank heuristic
+
+Any least-squares / linear-solve step whose output is a **reported
+number** (an evaluation metric, a probe score, a fitted coefficient that
+lands in `results.csv`) must:
+
+1. run the solve in **float64**, casting up from float32 activations at
+   the boundary, and
+2. not rely on a solver's automatic rank cutoff to handle an
+   ill-conditioned system — regularize explicitly (ridge) or use an
+   SVD-based driver, and state which.
+
+Why: `projects/jepa`'s linear probe did neither, and reported wrong
+numbers for two experiments before anyone noticed (issue #104). It called
+`torch.linalg.lstsq` on a float32 4000×2049 design matrix with condition
+number ~1.9e8. The default CPU driver (`gelsy`) applies an rcond-based rank
+cut; at float32 precision that cut discarded most of the real signal, so
+the returned "least-squares solution" had a **15–40× worse training
+residual** than attainable. Held-out R² came back as 0.36–0.61 —
+*varying across bit-identical repeated calls* — where a faithful fit of
+the same embeddings scores 0.977. Cast the identical system to float64
+and `gelsy` and `gelsd` agree exactly: the catastrophe was precision, not
+the algorithm.
+
+The failure mode is what makes this a convention rather than a one-off
+bug fix. There was no exception, no warning, and no NaN — just a
+plausible-looking number in the 0.1–0.6 range that got written into an
+experiment write-up and reasoned about at length. Metric code has no
+downstream consumer that will notice it is wrong, which is exactly why it
+needs the stricter numerical standard, not the looser one.
+
+Determinism note: float32 BLAS reductions vary by thread count (~4e-7 on
+this system), which is the same order as discrepancies a run-to-run
+comparison might be asked to resolve. The float64 path holds to ~1e-12
+across 1/2/4/8 threads, so a metric is reproducible across machines with
+different core counts.
+
+See `projects/jepa/src/jepa/eval.py` for the reference implementation and
+`projects/jepa/tests/test_eval.py` for the three properties worth
+asserting (reproducibility, thread-count stability, and that the fit
+actually reaches the least-squares optimum).

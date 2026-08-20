@@ -1,5 +1,20 @@
 # Does the full Slice 1 JEPA pipeline avoid collapse and out-probe naive baselines? (issue #69)
 
+> **Amended 2026-08-20 by issue #104 — every `probe_r2` number below is wrong.**
+> The linear probe used `torch.linalg.lstsq` on a float32, condition-number-~1.9e8
+> design matrix; its default CPU driver rank-truncated away most of the real
+> signal and returned a different answer on each identical call. The probe rows
+> in the results table, and the "Linear-probe R²" paragraph interpreting them,
+> are artifacts of that defect and are retained here only as a record of what was
+> originally reported. Corrected numbers: all three variants score 0.9763-0.9773,
+> indistinguishable. **The negative result stands but for a different reason**
+> — the probe is saturated, not noisy. See
+> `003-probe-solver-correctness.md`.
+>
+> Unaffected: every `effective_rank` and `embedding_std` number here, and the
+> collapse-avoidance finding built on them. Those go through an SVD, never the
+> broken least-squares path.
+
 Tasks A-D (bouncing-ball generator, encoder/EMA-target/predictor/masking,
 training loop, collapse-metric + linear-probe eval harness) built Slice 1's
 infrastructure but never ran it end-to-end against a control. This is Arc
@@ -64,9 +79,9 @@ appear, and the probe-R² hypothesis does not hold at this scale.**
 | full (EMA) | embedding_std (patch-level, 3000 steps) | 0.4951 | 0.5311 | 0.4933 |
 | no_ema (ablation) | embedding_std (patch-level, 3000 steps) | 0.4779 | 0.3439 | 0.1640 |
 | random_init | embedding_std (patch-level) | 0.0179 | 0.0156 | 0.0114 |
-| full (EMA) | probe_r2 (position+velocity, held-out) | 0.1491 | 0.4542 | 0.1688 |
-| no_ema (ablation) | probe_r2 (position+velocity, held-out) | 0.1883 | 0.1257 | 0.1660 |
-| random_init | probe_r2 (position+velocity, held-out) | 0.9762 | 0.1001 | 0.1741 |
+| full (EMA) | ~~probe_r2~~ (superseded, #104) | 0.1491 | 0.4542 | 0.1688 |
+| no_ema (ablation) | ~~probe_r2~~ (superseded, #104) | 0.1883 | 0.1257 | 0.1660 |
+| random_init | ~~probe_r2~~ (superseded, #104) | 0.9762 | 0.1001 | 0.1741 |
 
 All numbers above come directly from `tests/test_baseline_collapse_avoidance.py`'s harness
 (`COLLAPSE_STEPS=3000`, `ema_momentum=0.996` default, probe `n_train=4000`/`n_test=300`) and are
@@ -83,7 +98,7 @@ inconsistent across seeds, unlike the effective_rank gap. Both trained variants 
 random_init's std by 10–30×, so *some* signal in embedding_std distinguishes "trained" from
 "untrained" — it just doesn't distinguish full from no_ema specifically.
 
-**Linear-probe R²: does not confirm the issue's second hypothesis.** Full's probe R² (0.149–0.454)
+**Linear-probe R²: does not confirm the issue's second hypothesis.** *(Superseded by #104 — the numbers in this paragraph are solver artifacts; the conclusion survives, the reasoning does not.)* Full's probe R² (0.149–0.454)
 is not reliably above random_init's (0.100–0.976) — at seed 0, random_init actually scores highest
 of all nine cells in the table (0.976), while at seeds 1/2 all three variants land within the same
 0.10–0.45 band with no consistent ordering. This directly contradicts "full model clears a
