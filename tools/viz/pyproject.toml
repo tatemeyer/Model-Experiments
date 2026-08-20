@@ -26,7 +26,7 @@ dependencies = ["matplotlib>=3.8", "numpy>=1.26"]
     "trame-vuetify>=2",
     "nest-asyncio2>=1.7.2",
     "imageio>=2.34",
-    "kaleido==0.2.1",
+    "kaleido==1.3.0",
 ]
 
 [project.scripts]
