@@ -25,6 +25,13 @@ PATCH_SIZE = 4
 EMBED_DIM = 32
 HIDDEN_DIM = 32
 PREDICTOR_DIM = 16
+# Arc 1 Slice 3 (issue #107) makes these two the swept axes. The values here are the ones already
+# in force before that slice (models.Predictor's own `depth` default, and BlockMaskGenerator's
+# target-block defaults), named as constants so the sweep varies a parameter rather than a magic
+# number and so "the default" has one definition.
+PREDICTOR_DEPTH = 2
+NUM_TARGET_BLOCKS = 4
+TARGET_SCALE_RANGE = (0.15, 0.2)
 EMA_MOMENTUM = 0.996
 POOL_SIZE = 512
 STEPS = 300
@@ -52,6 +59,9 @@ def train_jepa(
     use_ema: bool = True,
     checkpoint_steps: Sequence[int] | None = None,
     on_checkpoint: Callable[[int, PatchEncoder], None] | None = None,
+    predictor_depth: int = PREDICTOR_DEPTH,
+    num_target_blocks: int = NUM_TARGET_BLOCKS,
+    target_scale_range: tuple[float, float] = TARGET_SCALE_RANGE,
 ) -> tuple[PatchEncoder, EMATargetEncoder | PatchEncoder, Predictor]:
     # seed before model construction, not after (projects/em-piml/CLAUDE.md issue #19's standing
     # rule) -- the frame pool and masking RNG are seeded from the same `seed` value but via their
@@ -77,10 +87,21 @@ def train_jepa(
             embed_dim=EMBED_DIM,
             hidden_dim=HIDDEN_DIM,
         )
+    # predictor_depth / num_target_blocks / target_scale_range default to the values in force
+    # before Arc 1 Slice 3 (issue #107), so every existing call site is unchanged bit-for-bit --
+    # verified by test_slice3_defaults_reproduce_slice2_effective_rank, not assumed.
     predictor = Predictor(
-        embed_dim=EMBED_DIM, num_patches=encoder.num_patches, predictor_dim=PREDICTOR_DIM
+        embed_dim=EMBED_DIM,
+        num_patches=encoder.num_patches,
+        predictor_dim=PREDICTOR_DIM,
+        depth=predictor_depth,
     )
-    mask_gen = BlockMaskGenerator(grid_h=encoder.grid_size, grid_w=encoder.grid_size)
+    mask_gen = BlockMaskGenerator(
+        grid_h=encoder.grid_size,
+        grid_w=encoder.grid_size,
+        num_target_blocks=num_target_blocks,
+        target_scale_range=target_scale_range,
+    )
 
     frame_pool = _make_frame_pool(pool_size, seed)
     batch_rng = torch.Generator().manual_seed(seed)

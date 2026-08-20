@@ -40,7 +40,8 @@ Only Arc 1 is broken down into implementable work so far; Arcs 2-4 are
 backlog, to be detailed once Arc 1 produces a mechanism finding worth
 building on.
 
-1. **Arc 1 — Collapse-avoidance mechanism study** (in progress). What
+1. **Arc 1 — Collapse-avoidance mechanism study** (**complete**, issues
+   #69/#97/#107 — see the Arc 1 conclusion below). What
    actually prevents representation collapse (EMA momentum, predictor
    depth/width, masking ratio/strategy) in a controlled setting where
    many seeds are cheap to run? Builds the shared encoder/predictor/eval
@@ -60,10 +61,47 @@ building on.
      is at the *high*-momentum end, and **stop-gradient — not EMA
      smoothing — is what prevents collapse**. See
      `experiments/002-momentum-collapse-boundary.md`.
-   - **Slice 3 (not yet filed)** — masking ratio and predictor depth, the
-     two axes deferred out of Slice 2. Given how flat the momentum
-     plateau turned out to be (momentum is near-irrelevant from 0.0 to
-     0.999), these may matter more than momentum did.
+   - **Slice 3 — "Do masking ratio or predictor depth move the collapse
+     boundary?"** (issue #107, done). The two axes deferred out of Slice
+     2. Answer: **neither, at all.** Across depth {1,2,4} × realized
+     masked fraction {0.26, 0.49, 0.70} × 3 seeds, between-configuration
+     variation in `effective_rank` is *smaller* than seed-to-seed
+     variation (F = 0.674). Masking ratio does affect training stability
+     — at the heavy end the loss was still rising in 9/9 runs — but that
+     never reaches the collapse metric. See
+     `experiments/004-masking-ratio-predictor-depth.md`.
+
+   **Arc 1 conclusion — collapse avoidance here is essentially binary.**
+   Arc 1 asked which of three levers prevents representation collapse.
+   Having swept all three, the answer is that **only one of them is a
+   lever at all**:
+
+   - **Stop-gradient — decisive.** Removing it (`use_ema=False`, a
+     target trained by ordinary gradient descent) is the only
+     manipulation in the whole Arc that reliably collapses the
+     representation: `effective_rank` 1.25–1.46, far below everything
+     else measured, and below an untrained encoder.
+   - **EMA momentum — irrelevant across four orders of magnitude**
+     (0.0 → 0.999 is a flat healthy plateau). Momentum **0.0** — pure
+     stop-gradient with zero smoothing — is the best cell measured. Only
+     the degenerate extreme 0.9999, where the target barely moves and
+     the prediction task itself degenerates, fails.
+   - **Masking ratio — no effect** on collapse (affects optimization
+     stability only).
+   - **Predictor depth — no effect.**
+
+   So the mechanism is the *stop-gradient asymmetry*, not the momentum
+   schedule, the masking design, or predictor capacity. This
+   independently reproduces SimSiam's central claim (Chen & He,
+   arXiv:2011.10566 — stop-gradient is essential, a momentum encoder is
+   not) on a different architecture and a different task, and it is the
+   one finding Arcs 2–4 should build on.
+
+   **The dominant variable was one Arc 1 never named: training length.**
+   Every cell of Slice 3's grid at 3000 steps overlaps the *untrained*
+   random-init band (2.44–2.93); Slice 2's plateau at 6000 steps clears
+   it (3.15–4.03). Step count moved `effective_rank` further than any
+   architectural lever the Arc set out to study — see Slice 3's leads.
 2. **Arc 2 — Latent vs. pixel-space prediction.** Does latent-space
    prediction beat a pixel-space autoencoder baseline and a contrastive
    (SimCLR-style) baseline on sample-efficiency of the downstream probe,
@@ -113,6 +151,12 @@ Verdict key: ✅ helped · ⚠️ partial/modest · ❌ no effect · 🔻 active
 |---|---|---|---|
 | #97 | Where is the EMA-momentum collapse boundary, and how does it move with training length? | ✅ answered — no boundary at the low end (momentum 0.0–0.999 is a flat healthy plateau, 3.15–4.03); collapse only at 0.9999, *below* random init. **Stop-gradient, not EMA smoothing, is the mechanism.** | `experiments/002-momentum-collapse-boundary.md` |
 
+**Slice 3 — masking ratio & predictor depth**
+
+| issue | question | verdict | where |
+|---|---|---|---|
+| #107 | Do masking ratio or predictor depth move the collapse boundary? | ❌ neither — across depth {1,2,4} × masked fraction {0.26,0.49,0.70} × 3 seeds, between-configuration variation is *smaller* than seed noise (**F = 0.674**). Masking ratio affects training stability only (heavy: loss still rising in 9/9 runs). **Step count outweighed both axes.** | `experiments/004-masking-ratio-predictor-depth.md` |
+
 ## Open leads
 
 - ~~Slice 2 should vary `ema_momentum` and `steps` jointly — issue #69
@@ -157,7 +201,30 @@ Verdict key: ✅ helped · ⚠️ partial/modest · ❌ no effect · 🔻 active
   deeper encoder.~~ Much weaker motivation after #104: the shallow
   encoder isn't what limits the score, the ceiling is. Change the task
   before the architecture.
-- Arcs 2-4 above are the standing backlog once Arc 1 lands a finding.
+- **Training length is the untested axis that actually mattered** (issue
+  #107). Every cell of Slice 3's 3000-step grid overlaps the *untrained*
+  random-init band; Slice 2's 6000-step plateau clears it. Step count
+  moved `effective_rank` further than momentum, masking ratio, or
+  predictor depth — and it has never been studied as the primary
+  variable, only as a checkpoint ladder underneath a momentum sweep. It
+  is also cheap. This is the strongest remaining Arc-1-adjacent lead.
+- **`effective_rank` needs more than 3 seeds per cell.** Slice 3's
+  within-cell seed spread reached 1.333, comparable to the entire range
+  across all nine configurations, which is why that grid returned F <
+  1. Any future sweep on this metric should budget more seeds per cell
+  or it will be unable to answer its own question regardless of what it
+  varies.
+- **Regression thresholds here need margin for torch-version drift.**
+  Slice 3 found the recorded 2026-08-03 `effective_rank` values no
+  longer reproduce exactly under `torch 2.13.0+cu126` (up to +0.06 on
+  seed 0); the *unmodified* code reproduces the new numbers, so it is
+  the environment, not the code. Seed spread (~0.75) is an order of
+  magnitude larger, so no conclusion was affected — but a tight
+  threshold would break spuriously.
+- Arcs 2-4 above are the standing backlog now that Arc 1 has landed its
+  finding (**stop-gradient is the mechanism; the other two levers are
+  inert**). Note Arc 2 additionally needs the probe-task fix above
+  before it can measure anything.
 - A repo-wide spec/plan conventions overhaul is in flight (separate
   effort) that may formalize where Arc/Slice work like this is tracked
   going forward (a `docs/design/` Design→Arc→Slice spec tree already
