@@ -164,6 +164,7 @@ periods collapses to a degenerate near-constant output; what fixes it?
 | #20 | Does pseudo-sequence tokenization (PINNsFormer) beat the raw-coordinate baseline? | 🔻 markedly worse | `experiments/020-pseudo-sequence-tokenization.md` |
 | #46 | Does capacity help resolve a local dielectric-interface derivative kink, in contrast to issue #25's negative global-spectral-content finding? | ⚠️ real but modest, reduced-scope result | `experiments/046-dielectric-interface-capacity.md` |
 | #64 | Does the field-persist -> mx-viz-render pipeline (issues #61/#62) work end-to-end on real data? | ✅ | `experiments/064-field-persist-render-poc.md` |
+| #60 | Does `--device cuda` actually place tensors on the GPU, and is the GPU worth using here? | ⚠️ placement ✅ verified on real hardware; **GPU is 2.2× slower** for the FP32 long-horizon variant and a wash for FP64 — these workloads are kernel-launch-bound, not FLOP-bound | `experiments/060-gpu-device-verification.md` |
 
 ## Open leads
 
@@ -310,12 +311,24 @@ stale.
 
 ## Known deferred items
 
-- `torch` is installed from plain PyPI (bundles CUDA deps, larger than
-  necessary for a CPU-only baseline). The dedicated CPU-only wheel index
-  (`https://download.pytorch.org/whl/cpu`, via `[tool.uv.sources]` +
-  `[[tool.uv.index]]`) is the right fix but couldn't be verified from
-  this session's sandboxed network — untested config wasn't worth
-  shipping blind. Revisit if CI install time/size becomes a problem.
+- `torch` is installed from plain PyPI **on Linux/macOS** (bundles CUDA
+  deps, larger than necessary for a CPU-only baseline). The dedicated
+  CPU-only wheel index (`https://download.pytorch.org/whl/cpu`, via
+  `[tool.uv.sources]` + `[[tool.uv.index]]`) is the right fix but
+  couldn't be verified from that session's sandboxed network — untested
+  config wasn't worth shipping blind. Revisit if CI install time/size
+  becomes a problem.
+  **Still open after issue #60**, which added the `[[tool.uv.index]]` +
+  `[tool.uv.sources]` machinery this needs — but scoped to `win32` only,
+  pointing at the *CUDA* index. #60's success criteria asked it to close
+  this item in the same change by pointing non-Windows platforms at the
+  CPU index; that directly contradicts its own stronger, explicitly
+  verified requirement that CI's Linux `torch` resolution be unchanged,
+  so it was deliberately left undone. Closing it is now a small,
+  self-contained follow-up: add a second `[[tool.uv.index]]` and a
+  `marker = "sys_platform != 'win32'"` source entry. It *will* change
+  CI's resolved torch to `+cpu`, which is the whole point and needs to
+  be an accepted, deliberate change rather than a side effect.
 - Equation tokenization (PITT) and patch-based multi-scale tokenization
   (MeshTok) were evaluated in issue #20 and ruled out of scope for this
   project's current shape (single fixed equation, no gridded field) —

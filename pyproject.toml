@@ -8,6 +8,30 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
 
+# torch on Windows comes from PyTorch's CUDA wheel index, not PyPI, whose Windows wheel ships no
+# CUDA runtime at all (its CUDA dependencies all carry Linux-only markers) -- so a default resolve
+# leaves torch.cuda.is_available() False on a machine with a working GPU. See issue #60.
+#
+# `explicit = true` means this index is consulted ONLY for packages that name it in
+# [tool.uv.sources] below, never as a general fallback for the rest of the workspace. That matters
+# for the same reason this repo SHA-pins third-party Actions: an unpinned second package index is
+# a supply-chain surface across every dependency, not just torch.
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+# Scoped to win32 ONLY, deliberately: without the marker this would also re-source torch for CI's
+# ubuntu-latest runner, changing shared CI surface for no reason. Linux/macOS keep resolving torch
+# from PyPI exactly as before -- verified on the uv.lock diff, not assumed.
+#
+# cu126 rather than a newer variant because it is the CUDA build shipping a cp313 Windows wheel
+# for the torch version already locked here (2.13.0), so this changes the build variant without
+# changing the version. The installed driver reports CUDA 13.1, which runs 12.6-built binaries,
+# and Turing/sm_75 is supported by this build.
+torch = [{ index = "pytorch-cu126", marker = "sys_platform == 'win32'" }]
+
 [tool.pytest.ini_options]
 testpaths = ["tools", "projects"]
 markers = [
