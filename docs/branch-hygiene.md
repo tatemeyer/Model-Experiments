@@ -75,12 +75,15 @@ explained.
 **A docs-only PR that produces no check run will wait forever** on a ruleset
 requiring that check. Hit in Parallax #43.
 
-It does **not** affect Model-Experiments: `ci.yml` is `on: pull_request:` with no
-`paths:` filter and its `verify` job has no `if:`, so every PR gets a `verify`
-run regardless of content. Confirmed against merged PRs.
+It does **not** affect Model-Experiments in that form: `ci.yml` is
+`on: pull_request:` with no `paths:` filter and its `verify` job has no `if:`,
+so every PR gets a run regardless of content. Confirmed against merged PRs.
 
 It **will** affect any repo whose CI is path-filtered. The fix is a required
-check that always runs and aggregates the optional ones:
+check that always runs and aggregates the real jobs. **Name it `gate`** — that
+is what Parallax requires and what Model-Experiments is switching to, so one
+playbook and one ruleset line fit every repo here, SESH included once it gets
+protection at all:
 
 ```yaml
 jobs:
@@ -88,38 +91,99 @@ jobs:
     if: <heavy work only when relevant paths changed>
     # ...
 
-  verify:            # <- the ONLY name listed as a required status check
+  gate:              # <- the ONLY name listed as a required status check
+    if: always()     # load-bearing: without it a failed dep makes this
+                     # *skipped*, and GitHub counts a skipped required
+                     # check as satisfied -- green by not running
     needs: [test]
-    if: always()     # runs even when `test` is skipped
     runs-on: ubuntu-latest
     steps:
-      - name: Gate
+      - name: No required job may have failed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}   # single quotes: the
+                     # expression syntax has no double-quoted string, and
+                     # `" "` invalidates the whole file. Via `env:` so the
+                     # value arrives as data, not spliced into the shell.
         run: |
-          # A skipped dependency is success here; only a real failure fails.
-          [ "${{ needs.test.result }}" = "failure" ] && exit 1
-          [ "${{ needs.test.result }}" = "cancelled" ] && exit 1
-          echo "ok"
+          for result in $RESULTS; do
+            case "$result" in
+              failure|cancelled)
+                echo "::error::a required job reported '$result'"
+                exit 1 ;;
+            esac
+          done
 ```
 
-Require `verify`, never the heavy jobs directly. Adding a path filter to a job
+Require `gate`, never the heavy jobs directly. Adding a path filter to a job
 whose name is a required check is how a repo silently deadlocks its own merges.
+
+**Pick the right strictness — the two forms are not interchangeable.**
+
+| repo shape | gate test | why |
+|---|---|---|
+| CI has **conditional / path-filtered** jobs | fail on `failure`/`cancelled` only (above) | a deliberate skip must not block the merge — that is the whole point of the aggregator |
+| CI has **no conditional jobs** | fail on anything `!= success`, skips included | catches a job whose `if:` silently stops matching, i.e. green-by-not-running |
+
+Model-Experiments uses the strict form, because `verify` has no `if:` and no
+`paths:` filter and therefore can never legitimately skip. **The day a
+conditionally-skipped job joins its `needs:` list, that test has to change** —
+`ci.yml` says so at the point where it matters.
+
+**Model-Experiments adopted `gate` too, for a second reason worth carrying to
+any repo that outgrows one CI job.** Path filters are not the only way a
+required name stops reporting: a required context is matched by *string*, so
+turning `verify` into a matrix renames its contexts to `verify (jepa)`,
+`verify (em-piml)`, and the required `verify` never reports again — every PR
+blocked forever, fix living in a settings page rather than in the diff that
+caused it. Requiring a name defined in `ci.yml` makes that a reviewable change
+to the workflow file instead.
+
+### Migration order — get this wrong and every PR blocks
+
+A required context that no workflow produces blocks **every** PR permanently
+and silently ("Expected — waiting for status to be reported," not a failure):
+
+1. Land the job on the **default branch** first.
+2. Confirm it ran there (`gh run list --branch main`) and that the context name
+   is exactly what the ruleset will name. Never require a name you have not
+   seen report.
+3. Only then add the name to the ruleset / branch protection.
+4. **A PR opened before the job existed keeps a stale merge ref and never
+   produces the check.** Reopening does not reliably refresh it;
+   `gh pr update-branch <n>` does. Learned the hard way in Parallax.
+
+Doing the switch while **zero PRs are open** skips step 4 entirely.
 
 ## Ruleset config for a repo that has none
 
-`parallax` and `SESH` currently have **no rulesets and no branch protection** —
-`GET /repos/{owner}/{repo}/rulesets` returns `[]` for both.
+**Status as of 2026-08-20** (re-verified against the live API, since every
+earlier statement of it in issue #94 was wrong in one direction or the other):
 
-> **Do not diagnose this with `GET /branches/{branch}/protection`.** That
-> endpoint returns **404 for a ruleset-protected branch**, so a 404 means
-> "no *classic* protection", not "unprotected". This exact inference has now
-> produced a wrong conclusion twice in issue #94's own history. Use the
-> `/rulesets` endpoint.
+| repo | protected by | required check |
+|---|---|---|
+| Model-Experiments | **ruleset** `main`, bypass list empty | `verify` → **`gate`** (this change) |
+| parallax | **classic branch protection** | `gate` |
+| SESH | nothing | — |
+
+> **Neither endpoint alone can tell you whether a branch is protected, and
+> both traps have now been sprung.**
+>
+> - `GET /branches/{branch}/protection` returns **404 for a
+>   ruleset-protected branch**. A 404 means "no *classic* protection", not
+>   "unprotected". This produced a wrong conclusion twice in issue #94's own
+>   history — including a comment asserting all three repos were unprotected
+>   when Model-Experiments had been ruleset-protected since 2026-07-14.
+> - `GET /rulesets` returns **`[]` for a classically-protected branch**.
+>   Parallax is exactly this: `[]` from `/rulesets`, and
+>   `{"checks":["gate"],"strict":false}` from `/branches/main/protection`.
+>
+> **Check both.** A repo is unprotected only when both come back empty.
 
 Model-Experiments' working configuration, documented in full in
 `.github/SETUP.md` — mirror it:
 
 - **`main` ruleset** (target `~DEFAULT_BRANCH`): require a PR (**0** approvals),
-  require status check `verify` (strict / branches up to date), require linear
+  require status check **`gate`** (strict / branches up to date), require linear
   history, block force pushes, restrict deletions, **bypass list empty**.
 - **`tags` ruleset**: restrict deletions and updates.
 
