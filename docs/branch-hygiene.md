@@ -80,9 +80,10 @@ It does **not** affect Model-Experiments in that form: `ci.yml` is
 so every PR gets a run regardless of content. Confirmed against merged PRs.
 
 It **will** affect any repo whose CI is path-filtered. The fix is a required
-check that always runs and aggregates the real jobs — and all three repos now
-use the same name, **`gate`**, so one playbook and one ruleset line fit
-everywhere:
+check that always runs and aggregates the real jobs. **Name it `gate`** — that
+is what Parallax requires and what Model-Experiments is switching to, so one
+playbook and one ruleset line fit every repo here, SESH included once it gets
+protection at all:
 
 ```yaml
 jobs:
