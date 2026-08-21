@@ -36,9 +36,10 @@ qualitative video predictions.
 
 ## Research Arc roadmap
 
-Only Arc 1 is broken down into implementable work so far; Arcs 2-4 are
-backlog, to be detailed once Arc 1 produces a mechanism finding worth
-building on.
+Arc 1 is complete. Arc 2 is **proposed, not yet approved** — see
+`docs/superpowers/specs/2026-08-20-jepa-arc2-scale-and-duration-design.md`;
+it renumbers what were previously Arcs 2-4 to 3-5. Arcs 3-5 remain
+backlog.
 
 1. **Arc 1 — Collapse-avoidance mechanism study** (**complete**, issues
    #69/#97/#107 — see the Arc 1 conclusion below). What
@@ -102,15 +103,38 @@ building on.
    random-init band (2.44–2.93); Slice 2's plateau at 6000 steps clears
    it (3.15–4.03). Step count moved `effective_rank` further than any
    architectural lever the Arc set out to study — see Slice 3's leads.
-2. **Arc 2 — Latent vs. pixel-space prediction.** Does latent-space
+2. **Arc 2 — Scale and duration** (**proposed**, design at
+   `docs/superpowers/specs/2026-08-20-jepa-arc2-scale-and-duration-design.md`).
+   Arc 1's dominant variable was one it never named: every cell of the
+   3000-step Slice 3 grid overlaps the *untrained* random-init band,
+   while Slice 2's 6000-step runs clear it. So Arc 1 leaves one question
+   genuinely open — **are masking ratio and predictor depth inert, or is
+   3000 steps too few for them to show?** Those are different claims and
+   Slice 3's design cannot separate them: its runs had not converged
+   (heavy masking, loss still rising 9/9), and its detection floor
+   (MDD ≈ 0.39 `effective_rank`) was larger than either effect it could
+   have observed. Re-analysing its 27 rows with seed as a blocking factor
+   raises F only 0.674 → 0.804, still below 1 — the null is not a
+   statistics artifact and has to be attacked with compute. Three slices:
+   the duration curve (with `pool_size` controlled, since 512 frames ×
+   3000 passes confounds "trains longer" with "revisits a small pool"),
+   the powered re-run of Slice 3's grid at convergence, and a model-scale
+   slice made conditional on where the metric tops out against its
+   ceiling of 32. The masking/stability thread folds in here as a
+   convergence gate rather than becoming its own arc — "loss still rising
+   at 3000 steps" and "3000 steps is too few" are the same sentence.
+3. **Arc 3 — Latent vs. pixel-space prediction.** Does latent-space
    prediction beat a pixel-space autoencoder baseline and a contrastive
    (SimCLR-style) baseline on sample-efficiency of the downstream probe,
-   holding encoder capacity fixed?
-3. **Arc 3 — Stochastic futures (MoP-JEPA-style).** On a toy environment
+   holding encoder capacity fixed? **Blocked** on the probe-task redesign
+   (see open leads) — issue #104 left ~0.001 of headroom, so this arc
+   cannot measure anything until that is fixed. That block is the main
+   reason Arc 2 above goes first.
+4. **Arc 4 — Stochastic futures (MoP-JEPA-style).** On a toy environment
    with genuine multimodality (e.g. a ball reaching a fork with two
    valid continuations), does a mixture-of-predictors resolve the
    blurry/averaged single-predictor failure MoP-JEPA reports?
-4. **Arc 4 — Toy world-model planning.** Can predictor-rollout energy
+5. **Arc 5 — Toy world-model planning.** Can predictor-rollout energy
    minimization do short-horizon planning (e.g. "reach target region")
    in the toy environment, echoing V-JEPA 2's zero-shot robot planning
    at toy scale?
@@ -187,9 +211,10 @@ Verdict key: ✅ helped · ⚠️ partial/modest · ❌ no effect · 🔻 active
   *untrained* encoder already scores x/y R² = 0.9998, so the whole
   measurable range for a training effect is ~0.001. Velocity is
   structurally unrecoverable (single-frame samples; R² < 0 for every
-  variant) and carries only 2.2% of the variance. **Arc 2 is specified
-  around downstream-probe sample-efficiency and cannot produce a
-  meaningful result until this is fixed** — needs multi-frame inputs,
+  variant) and carries only 2.2% of the variance. **Arc 3 (latent vs.
+  pixel) is specified around downstream-probe sample-efficiency and
+  cannot produce a meaningful result until this is fixed** — needs
+  multi-frame inputs,
   per-dimension or standardized-target scoring, and a task a random
   projection doesn't already solve.
 - Probe R² is **not a collapse detector** here: `no_ema` sits at
@@ -213,7 +238,17 @@ Verdict key: ✅ helped · ⚠️ partial/modest · ❌ no effect · 🔻 active
   across all nine configurations, which is why that grid returned F <
   1. Any future sweep on this metric should budget more seeds per cell
   or it will be unable to answer its own question regardless of what it
-  varies.
+  varies. **Quantified while scoping Arc 2** (no new compute, from
+  `results.csv`): treating seed as a *blocking* factor rather than
+  leaving it in the residual removes 26% of the within-cell sum of
+  squares and lifts F from 0.674 to 0.804 — **still below 1**, so the
+  null survives the better analysis. The number worth carrying forward is
+  the detection floor it implies: residual sd 0.388 at n = 3 gives a
+  minimum detectable difference of **≈0.39** between marginal means,
+  against observed spreads of 0.117 (depth) and 0.267 (masking). Slice 3
+  could not have resolved its own largest observed effect. Reaching
+  MDD ≤ 0.20 needs ~12 seeds per cell. Seed should be a *pre-registered*
+  block in any future analysis here, not one chosen after seeing F.
 - **Regression thresholds here need margin for torch-version drift.**
   Slice 3 found the recorded 2026-08-03 `effective_rank` values no
   longer reproduce exactly under `torch 2.13.0+cu126` (up to +0.06 on
@@ -221,10 +256,18 @@ Verdict key: ✅ helped · ⚠️ partial/modest · ❌ no effect · 🔻 active
   the environment, not the code. Seed spread (~0.75) is an order of
   magnitude larger, so no conclusion was affected — but a tight
   threshold would break spuriously.
-- Arcs 2-4 above are the standing backlog now that Arc 1 has landed its
+- **Training length is proposed as Arc 2** now that Arc 1 has landed its
   finding (**stop-gradient is the mechanism; the other two levers are
-  inert**). Note Arc 2 additionally needs the probe-task fix above
-  before it can measure anything.
+  inert**) — design at
+  `docs/superpowers/specs/2026-08-20-jepa-arc2-scale-and-duration-design.md`,
+  awaiting approval. It is scoped around the *finding* (duration
+  dominated) rather than the null, and its load-bearing slice is the one
+  that separates "the levers are inert" from "3000 steps is too few for
+  them to show" — by checkpointing one set of long runs so the same
+  compute yields both a powered replication of Slice 3's 3000-step null
+  and the same grid at convergence. Arcs 3-5 remain the standing backlog;
+  Arc 3 additionally needs the probe-task fix above before it can measure
+  anything, which is why it is no longer first.
 - A repo-wide spec/plan conventions overhaul is in flight (separate
   effort) that may formalize where Arc/Slice work like this is tracked
   going forward (a `docs/design/` Design→Arc→Slice spec tree already
