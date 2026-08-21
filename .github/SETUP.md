@@ -73,7 +73,9 @@ Repo → Settings → Rules → Rulesets → New ruleset, four of them:
 
 - Require a pull request before merging — 0 required approvals for now
   (solo maintainer); raise to 1+ if collaborators join
-- Require status checks to pass: select **`verify`** (the `CI` workflow)
+- Require status checks to pass: select **`gate`** (the `CI` workflow) —
+  see "The single required check" below. Historically this was `verify`;
+  do not switch back to naming a work job directly
 - Require branches to be up to date before merging — on (CI is cheap
   here; keeps `main` from absorbing a stale PR)
 - Require linear history — on (`auto-merge.yml` always squash-merges)
@@ -125,6 +127,85 @@ Repo → Settings → Rules → Rulesets → New ruleset, four of them:
 
 Set all of the above to **Active**, not "Evaluate" — Evaluate mode only
 logs what *would* have been blocked, it doesn't actually block anything.
+
+## The single required check (issue #94)
+
+`main` requires exactly one status check, named **`gate`**, defined in
+`.github/workflows/ci.yml` next to the jobs it gates rather than in this
+settings page. It is an `if: always()` job that `needs:` the real work
+jobs and fails if any of them reports anything other than `success`.
+
+**Why a name that does no work is the right name to require.** A required
+context is matched by string. Job names are not stable: the moment
+`verify` becomes a matrix — which this repo's own scaling principle
+anticipates, one project per `projects/<name>/`, on a job already taking
+8m26s — its contexts become `verify (jepa)`, `verify (em-piml)`, and the
+required `verify` never reports again. Every PR then blocks forever on a
+check that cannot run, with the fix living here rather than in the diff
+that caused it. `gate` decouples the two: adding or splitting a job is a
+reviewable change to `ci.yml`, and the ruleset never has to be touched.
+
+`if: always()` is load-bearing. Without it, a failed dependency makes
+`gate` **skipped** rather than failed, and GitHub counts a skipped
+required check as satisfied — the gate would go green by not running.
+
+### Never require a check name before the job exists on `main`
+
+A required context that no workflow produces blocks **every** PR
+permanently, and it does so silently: the PR shows "Expected — waiting for
+status to be reported," not a failure. Order matters:
+
+1. Land the workflow change that adds the job to the **default branch**.
+2. Confirm it actually ran there (`gh run list --branch main`) and that
+   the context name is exactly what the ruleset will name.
+3. Only then add the name to the ruleset.
+4. **Any PR opened before the job existed keeps a stale merge ref and
+   never produces the check.** Reopening does not reliably refresh it;
+   `gh pr update-branch <n>` does. Learned the hard way in Parallax.
+
+Doing the switch while **zero PRs are open** avoids step 4 entirely, and
+is worth waiting for.
+
+### How this interacts with the `autonomy:safe` self-merge path
+
+`auto-merge.yml` enables GitHub auto-merge on `autonomy:safe` PRs, so the
+required check *is* the gate for the autonomous path — nothing else stands
+between a labelled PR and `main`. Three interactions are worth knowing
+before touching either side, and all three fail **silently**, which is the
+signature this whole issue is about:
+
+- **Required approvals must stay at 0.** Raising
+  `required_approving_review_count` to 1 deadlocks self-merge
+  permanently: `auto-merge.yml` uses `GITHUB_TOKEN`, a token cannot
+  approve a PR, "Allow GitHub Actions to create and approve pull
+  requests" is deliberately unchecked, and the only human is the PR
+  author, who cannot self-approve. Every `autonomy:safe` PR would sit in
+  auto-merge-enabled limbo with no error. If human approval is ever
+  wanted, gate it **by label in a workflow** — a ruleset cannot tell
+  `autonomy:safe` from `autonomy:review`.
+- **`strict` (require branches up to date) + auto-merge is a stall
+  vector.** With `strict: true`, an auto-merge-enabled PR that falls
+  behind `main` cannot merge until its branch is updated, and if that
+  update would conflict, auto-merge is turned off with no notification.
+  This has already happened here: PR #106 was green and mergeable, #105
+  landed, and #106 silently became `CONFLICTING` — two PRs appending to
+  the same Markdown file. This repo's conventions *manufacture* that
+  conflict, since experiments append to `results.csv`, `LITERATURE.md`
+  and `CONVENTIONS.md` by design. Keep `strict: true` — absorbing a stale
+  PR is worse — but treat `gh pr update-branch` as routine rather than
+  exceptional whenever more than one PR is open.
+- **`require_extra_approval_for_unattributed_changes: true`** is mostly
+  inert at 0 approvals, but a commit with unrecognised authorship can
+  demand an approval nobody is able to give — the same silent stall from
+  a third direction.
+
+`branch-hygiene.yml` stays **not required**, deliberately: `audit`
+reports on repository state rather than on the diff, so a finding about
+another PR must never block an unrelated merge. `base-is-default` is
+diff-scoped and could reasonably become blocking, but `needs:` cannot
+cross workflow files — making it blocking means either moving that one
+job into `ci.yml` so it joins `gate`, or adding a second required name,
+which is exactly what `gate` exists to avoid. Left as-is.
 
 ## Actions
 

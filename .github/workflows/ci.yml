@@ -51,3 +51,65 @@ jobs:
         # tests (e.g. a PR touching only projects/jepa before jepa had any @pytest.mark.slow test)
         # -- pytest's own "no tests collected" exit code (5) must not fail the job in that case.
         run: xvfb-run -a uv run pytest -m 'slow and not gpu' ${{ steps.scope.outputs.paths }} || [ $? = 5 ]
+
+  # The single name `main`'s ruleset requires (issue #94). It exists so that the *required check*
+  # and the *job topology* are separate things -- the ruleset names one context that never changes,
+  # and this `needs:` list is what actually decides what blocks a merge.
+  #
+  # Why not keep requiring `verify` directly, given there is only one job today: a required context
+  # is matched by name, and job names are not stable. The moment `verify` becomes a matrix -- which
+  # this repo's own scaling principle anticipates, one project per `projects/<name>/`, on a job that
+  # already takes 8m26s -- the contexts become `verify (jepa)`, `verify (em-piml)`, and the required
+  # `verify` never reports again. Every PR then blocks forever on a check that cannot run, and the
+  # fix lives in a settings page rather than in the diff that caused it. Requiring a name defined
+  # here instead means adding or splitting a job is a reviewable change to this file.
+  #
+  # `if: always()` is load-bearing, and leaving it off gets this exactly backwards. Without it a
+  # failed dependency makes this job *skipped* rather than failed -- and GitHub counts a skipped
+  # required check as satisfied. The gate would go green by not running, which is worse than no
+  # gate at all.
+  #
+  # The honest caveat: `needs` is still a list somebody has to keep current, and a job added
+  # without being added here is a job the gate does not gate. That is the same shape of flaw as
+  # requiring the names directly -- but it lives in this file, next to the jobs, where a reviewer
+  # reading the diff that adds a job will see it.
+  #
+  # This gate is deliberately *strict*: anything other than `success` fails it, `skipped` included.
+  # That is correct here only because no job in this workflow is conditional -- `verify` has no
+  # `if:` and no `paths:` filter, so it runs on every PR and can never legitimately skip. Treating
+  # a skip as a failure is what catches a job whose `if:` silently stops matching.
+  # **If a conditionally-skipped job is ever added to `needs`, this test must change** to failing
+  # only on `failure`/`cancelled` -- otherwise the deliberate skip blocks every merge. That is the
+  # variant `docs/branch-hygiene.md` prescribes for path-filtered repos, and the difference between
+  # the two is not cosmetic.
+  #
+  # `branch-hygiene.yml`'s jobs are deliberately not here and deliberately not required: `audit`
+  # reports on repository state rather than on this diff, so a finding about another PR must never
+  # block an unrelated merge. `base-is-default` is diff-scoped and could reasonably become
+  # blocking, but it lives in another workflow and `needs` cannot cross workflow files -- so making
+  # it blocking means either moving that one job into this file (joining this gate) or adding a
+  # second required name, which is the thing this job exists to avoid. Left as-is; see SETUP.md.
+  gate:
+    if: always()
+    needs: [verify]
+    runs-on: ubuntu-latest
+    steps:
+      # Single quotes inside `${{ }}` are not a style choice: GitHub's expression syntax has no
+      # double-quoted string, and `" "` here makes the whole file invalid -- which surfaces as a
+      # run with no jobs rather than as an error on this line.
+      #
+      # Passed through `env` rather than interpolated into the script, so the value arrives as
+      # data. Expression output spliced straight into a shell command is the standard Actions
+      # injection bug, and it costs nothing to not have it.
+      - name: Every job above must have succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "::error::a required job reported '$result'"
+              exit 1
+            fi
+          done
+          echo "all required jobs succeeded"
