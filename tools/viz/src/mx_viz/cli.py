@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 
+from mx_viz import feed as viz_feed
 from mx_viz import io as viz_io
 from mx_viz import sweeps
 
@@ -31,6 +32,12 @@ def cmd_field(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_feed(args: argparse.Namespace) -> int:
+    count = viz_feed.write_feed(args.results, args.out)
+    print(f"Wrote {args.out} ({count} records)")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mx-viz", description="Repo-wide experiment visualization CLI"
@@ -50,6 +57,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     field_p.add_argument("artifact", help="Path to a field .npz artifact")
     field_p.set_defaults(func=cmd_field)
+
+    feed_p = sub.add_parser(
+        "feed",
+        help="Publish a tidy results.csv as the JSONL metrics feed parallax.yaml declares",
+    )
+    feed_p.add_argument("results", help="Path to a long-format results.csv")
+    feed_p.add_argument("--out", required=True, help="Output .jsonl path (beside the CSV)")
+    feed_p.set_defaults(func=cmd_feed)
 
     return parser
 

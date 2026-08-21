@@ -56,6 +56,21 @@ does.
   uv run mx-viz sweep .outputs/em-piml/some_sweep.json --out sweep.png [--kind box|bar]
   uv run mx-viz field .outputs/em-piml/some_field.npz
   ```
+  A third verb publishes rather than plots. `mx_viz.feed` projects a project's
+  tidy long-format `results.csv` into the JSONL metrics feed `parallax.yaml`
+  declares (issue #112) — same results, rendered for a machine consumer instead
+  of for a reader:
+  ```
+  uv run mx-viz feed projects/jepa/results.csv --out projects/jepa/results.jsonl
+  ```
+  The `.jsonl` is **checked in** (unlike `.outputs/`) so the declared feed is
+  backed on a fresh clone, and it is a *derived projection* — `results.csv`
+  stays the record of truth, and each project's `test_results_feed.py` fails CI
+  if the two drift. Re-run this after appending rows to a `results.csv`.
+  The record schema is dictated by the consumer's semantics, not chosen: see
+  `feed.py`'s module docstring before changing which columns are emitted as
+  strings, because that choice is what decides whether seeds group into one
+  series with spread or scatter into one-point series.
   `em_piml.train.save_field_grid_artifact(model, path)` wraps
   `evaluate_field_grid` to produce a field artifact. Loss-curve plots
   stay library-only (no loss-history checkpointing exists in this repo

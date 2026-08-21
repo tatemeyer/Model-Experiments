@@ -35,11 +35,48 @@ verification:
   # day mx-viz output is captured, and not before — a declared check
   # nothing backs is worse than an absent one.
 artifacts:
-  # Both feeds watch produced files, which are gitignored by design.
-  # An empty scan is legitimate; it means nothing has been run here yet.
+  # Both feeds previously watched `projects/*/results/**`, a directory that has
+  # never existed in this repo and that nothing writes to. Fixed in issue #112.
+  #
+  # The old comment here claimed both feeds watched "produced files, which are
+  # gitignored by design," so an empty scan was legitimate. That was wrong twice
+  # over: the gitignored output directory is `.outputs/` (see `.gitignore` and
+  # `tools/README.md`), not `projects/*/results/`, and an empty scan is only
+  # legitimate when a *producer exists and has not run* — not when nothing has
+  # ever written the path. Absent a producer it is the same thing this file
+  # names, ten lines up, as worse than an absent declaration.
+  #
+  # Figures land in `.outputs/<project>/` per `tools/README.md`'s mx-viz entry —
+  # gitignored, so this one really is "empty until something runs," which is now
+  # a true statement rather than an assumed one.
   - kind: figure
-    watch: projects/*/results/**/*.png
+    watch: .outputs/*/**/*.png
+  # Metrics point at a checked-in file, deliberately, so the feed is backed on a
+  # fresh clone rather than only on the machine that last ran a sweep.
+  #
+  # `results.jsonl` is a *derived projection* of `results.csv`, which stays the
+  # record of truth; `mx_viz.feed` writes it and
+  # `projects/jepa/tests/test_results_feed.py` fails CI if the two drift.
+  #
+  # Why publish JSONL rather than point at the CSV that already exists — the
+  # choice issue #112 asks to be argued, not defaulted. Parallax's
+  # `ArtifactAdapterKind` is a closed enum of figure/metrics(jsonl)/capture, and
+  # `ArtifactEntry` is `deny_unknown_fields`, so `adapter: csv` does not
+  # deserialize and a `.csv` glob under `adapter: jsonl` would hand CSV text to a
+  # JSONL parser. Pointing at the CSV today declares a feed the consumer cannot
+  # read — the same defect as declaring one nothing writes, moved one layer up.
+  # Long-format JSONL is also the shape that answers #112's second criterion
+  # *structurally*: the consumer reads `metric`/`value` records as measurements
+  # of separate configurations and marks the series **unordered**, so nothing
+  # draws a curve over what is really the writing loop's nesting. That property
+  # cannot be declared here — `deny_unknown_fields` leaves nowhere to put a
+  # `shape:` or `ordered:` key — so the feed has to carry its own shape, and this
+  # one does.
+  #
+  # This projection is provisional, not permanent: if Parallax grows a CSV
+  # adapter (suggested in tatemeyer/parallax#53), this repo can point at
+  # `results.csv` directly and delete both the projection and its sync test.
   - kind: metrics
     adapter: jsonl
-    watch: projects/*/results/**/*.jsonl
+    watch: projects/*/results.jsonl
 # No session feed: this repository has no `.claude/worktrees/`.

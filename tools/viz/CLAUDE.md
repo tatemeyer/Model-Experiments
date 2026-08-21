@@ -49,6 +49,32 @@ PyVista/VTK's off-screen renderer needs a real OpenGL context.
   off-screen fine without Xvfb (real Windows OpenGL), so `uv run
   pytest tools/viz` works directly — Xvfb is a Linux/CI-only need.
 
+## `mx_viz.feed` — why a publishing concern lives in a plotting package
+
+`feed.py` (issue #112) renders a project's `results.csv` as JSONL for the
+Parallax cockpit. It plots nothing and imports neither matplotlib nor
+numpy, so the placement is a judgement call worth recording rather than
+re-litigating:
+
+- This package already owns results **I/O** (`mx_viz.io` persists and
+  loads sweep results) and already owns "render results for a consumer" —
+  the consumer is usually a human looking at a PNG, and here it is a
+  cockpit reading a feed. Same job, different renderer.
+- The alternative was a fourth workspace package for ~40 lines, which
+  root `CLAUDE.md`'s "no scaffolding beyond what the intent requires"
+  argues against more strongly than this placement argues for a new home.
+
+**Its record schema is not free to change on taste.** Parallax's
+`parse_metrics` keeps only a record's *string* fields as dimensions and
+drops numeric ones, and groups series by (metric, dimensions). So
+emitting `seed` as a string scatters a variant's runs into one-point
+series and destroys the spread a null result lives in; emitting `issue`
+or `steps` as numbers deletes them from the cockpit entirely. Read
+`feed.py`'s module docstring before touching which columns are stringified,
+and note that `tools/viz/tests/test_feed.py` mirrors the consumer's
+grouping precisely so a schema regression fails there rather than in a
+chart nobody double-checks.
+
 ## Field-artifact / rendering pipeline
 
 `em_piml.train.evaluate_field_grid` → `em_piml.train.
