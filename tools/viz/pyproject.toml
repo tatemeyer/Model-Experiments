@@ -20,7 +20,7 @@ dependencies = ["matplotlib>=3.8", "numpy>=2.5.2"]
 # spirit to PyVista/VTK's self-contained off-screen renderer and is the CI-proven default.
 3d = [
     "pyvista>=0.45",
-    "plotly>=5.24",
+    "plotly>=7.0.0",
     "trame>=3",
     "trame-vtk>=2.11.16",
     "trame-vuetify>=2",
