@@ -19,7 +19,7 @@ dependencies = ["matplotlib>=3.8", "numpy>=2.5.2"]
 # separately-installed system Chrome via `choreographer`; 0.2.1's bundled Chromium is closer in
 # spirit to PyVista/VTK's self-contained off-screen renderer and is the CI-proven default.
 3d = [
-    "pyvista>=0.45",
+    "pyvista>=0.49.0",
     "plotly>=5.24",
     "trame>=3",
     "trame-vtk>=2.11.16",
